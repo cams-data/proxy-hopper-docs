@@ -13,6 +13,13 @@
 }
 
 
+/* ── Wider content area (~20% more at xl breakpoint) ── */
+@media (min-width: 1280px) {
+  #content-area {
+    width: calc(100% - 20rem) !important;
+  }
+}
+
 /* ── Overview page layout ── */
 .overview-page {
   max-width: 1032px;
