@@ -13,11 +13,6 @@
 }
 
 
-/* ── Wider content area (20% wider than Mintlify default 48rem) ── */
-.prose {
-  max-width: 58rem;
-}
-
 /* ── Overview page layout ── */
 .overview-page {
   max-width: 1032px;
