@@ -5,7 +5,11 @@
 
 /* ── Sidebar flush to left edge ── */
 #sidebar {
-  left: 0;
+  left: 10px;
+}
+
+#sidebar-content {
+  padding-left: 1.5rem;
 }
 
 
