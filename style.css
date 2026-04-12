@@ -13,10 +13,11 @@
 }
 
 
-/* ── Wider layout container (~20% more readable content width) ── */
-/* max-w-8xl = 88rem; bumping to 96rem shifts content width from ~661px to ~789px at 2K */
-div:has(> #sidebar) {
-  max-width: 96rem !important;
+/* ── Wider layout container (docs pages only, not the custom overview page) ── */
+/* max-w-8xl = 88rem; 104rem gives ~30% more readable text width at 2K */
+/* Scoped to data-page-mode != custom so the overview page (max-width:none + no mx-auto) is untouched */
+:root:not([data-page-mode="custom"]) div:has(> #sidebar) {
+  max-width: 104rem !important;
 }
 
 /* ── Overview page layout ── */
