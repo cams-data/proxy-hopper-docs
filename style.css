@@ -3,6 +3,12 @@
   max-width: 100%;
 }
 
+/* ── Hide search + Ask AI on overview page ── */
+:root[data-page-mode="custom"] #search-bar-entry,
+:root[data-page-mode="custom"] #assistant-entry {
+  display: none;
+}
+
 /* ── Sidebar flush to left edge ── */
 #sidebar {
   left: 10px;
