@@ -13,9 +13,14 @@
 }
 
 
+/* ── Wider content area (20% wider than Mintlify default 48rem) ── */
+.prose {
+  max-width: 58rem;
+}
+
 /* ── Overview page layout ── */
 .overview-page {
-  max-width: 860px;
+  max-width: 1032px;
   margin: 0 auto;
   padding: 0 24px;
   color: var(--ot-fg);
