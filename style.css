@@ -195,3 +195,35 @@ h1, h2, h3, h4 {
 .overview-page a.accent {
   color: #0D9488;
 }
+
+/* ── Sidebar sub-section headings (Configuration, Deployment, etc.) ──
+   Target only top-level group buttons — direct children of #sidebar-group.
+   Nested group buttons (Docker, Kubernetes, SSO Guides) sit inside a child
+   <ul> so the > combinator keeps them unaffected.                         */
+#sidebar-group > li[data-group-tag=""] > button {
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: #6b7280;
+  margin-top: 0.625rem;
+  padding-top: 0.25rem;
+  padding-bottom: 0.25rem;
+  border-radius: 0;
+  cursor: pointer;
+}
+
+#sidebar-group > li[data-group-tag=""] > button:hover,
+#sidebar-group > li[data-group-tag=""] > button:focus {
+  background: transparent !important;
+  color: #374151;
+}
+
+.dark #sidebar-group > li[data-group-tag=""] > button {
+  color: #9ca3af;
+}
+
+.dark #sidebar-group > li[data-group-tag=""] > button:hover,
+.dark #sidebar-group > li[data-group-tag=""] > button:focus {
+  color: #d1d5db;
+}
