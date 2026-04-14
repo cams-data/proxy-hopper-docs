@@ -1,0 +1,121 @@
+---
+title: "Client Identities"
+description: "How Proxy Hopper attaches a persistent browser persona to each (IP, target) pair to reduce bot detection and session-level rate limiting."
+---
+
+## What is a client identity?
+
+A **client identity** is a persistent persona that Proxy Hopper attaches to each (IP, target) pair. When enabled, every request made through a given IP to a given target looks like it comes from the same browser — consistent headers, the same cookie jar — across multiple requests.
+
+Without identities, every request looks like a cold, new connection with no session history. Many targets flag this as bot-like behaviour. With identities, a request from IP `10.0.0.1` to `api.example.com` arrives with a consistent User-Agent, `Accept` headers that match that browser, and any session cookies the target has previously set.
+
+## What an identity contains
+
+**Fingerprint profile** — a bundle of HTTP request headers that together resemble a real browser:
+
+| Header | Example value |
+|---|---|
+| `User-Agent` | `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 ...` |
+| `Accept` | `text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8` |
+| `Accept-Language` | `en-US,en;q=0.9` |
+| `Accept-Encoding` | `gzip, deflate, br` |
+
+**Cookie jar** — a per-identity dictionary of cookies received from the target. Cookies are parsed from `Set-Cookie` response headers and replayed on subsequent requests through the same IP. Cookies with `Max-Age=0` or an expired `Expires` date are deleted automatically.
+
+## Built-in fingerprint profiles
+
+Proxy Hopper ships with five browser profiles:
+
+| Profile name | Simulates |
+|---|---|
+| `chrome-windows` | Chrome on Windows 10 |
+| `chrome-macos` | Chrome on macOS |
+| `safari-macos` | Safari on macOS |
+| `firefox-windows` | Firefox on Windows 10 |
+| `firefox-linux` | Firefox on Linux |
+
+When no `profile` is set, each new identity picks a profile at random. This means different IPs in the same pool present as different browser types — which is more realistic than every IP using the same User-Agent.
+
+To pin all identities on a target to one profile:
+
+```yaml
+identity:
+  enabled: true
+  profile: chrome-windows
+```
+
+## Cookie isolation
+
+Cookies are stored per identity, not on a shared HTTP session. Proxy Hopper uses a `DummyCookieJar` on the underlying `aiohttp` session to prevent automatic cross-IP cookie sharing. Each identity manages its own `dict[str, str]` cookie store and injects it into outbound requests manually.
+
+This means a session cookie issued by the target to IP `10.0.0.1` is never sent on a request made through IP `10.0.0.2`.
+
+## Rotation triggers
+
+An identity is replaced with a fresh one when any of the following occurs:
+
+| Trigger | Condition | Configurable? |
+|---|---|---|
+| IP quarantined | IP hit `ipFailuresUntilQuarantine` consecutive failures and was removed from the pool | No — always rotates |
+| 429 response | Target returned HTTP 429 | `rotateOn429: false` to disable |
+| Request limit | Identity has handled `rotateAfterRequests` successful requests | Set `rotateAfterRequests: N` to enable |
+
+The quarantine rotation fires **before** the IP returns to the pool, so a fresh identity is ready as soon as the IP becomes available again.
+
+When `rotateOn429` is true and a 429 is received, the identity rotates even if the IP is not quarantined. The reasoning: a 429 often means the *session* is rate-limited, not just the IP. A new identity resets that session state.
+
+## Warmup requests
+
+When a fresh identity is created, it has no cookies. Some targets issue session cookies on first contact that are required for subsequent requests to succeed. The optional warmup request handles this:
+
+```yaml
+identity:
+  enabled: true
+  warmup:
+    enabled: true
+    path: /          # GET / through the new identity before it enters service
+```
+
+When warmup is configured, Proxy Hopper sends a `GET` to the specified path through the new identity before routing real requests through it. Any cookies issued in the warmup response are stored in the identity and replayed on subsequent requests.
+
+## Configuration
+
+Identity is configured per-target under the `identity:` key:
+
+```yaml
+targets:
+  - name: product-catalogue
+    regex: 'catalogue\.example\.com'
+    ipPool: au-pool
+    minRequestInterval: 10s
+    numRetries: 2
+    ipFailuresUntilQuarantine: 3
+    quarantineTime: 10m
+
+    identity:
+      enabled: true
+      cookies: true               # persist and replay session cookies per IP
+      # profile: chrome-windows  # fix a profile, or omit for random per identity
+      rotateAfterRequests: 100    # voluntarily rotate after 100 successful requests
+      rotateOn429: true           # rotate immediately on 429
+      warmup:
+        enabled: true
+        path: /                   # warmup path
+```
+
+See [Config Reference](/admin/configuration/reference#identity) for the complete field reference.
+
+## When to enable identities
+
+Enable identities when your target:
+
+- Sets session cookies and expects them to be replayed
+- Rate-limits per session rather than (or in addition to) per IP
+- Returns 429s that persist beyond the `minRequestInterval` cooldown — suggesting session-level throttling
+- Detects bots by analysing User-Agent consistency or the absence of Accept headers
+
+For simple targets that are rate-limited only by IP, identities add overhead with no benefit. Leave them disabled.
+
+<Tip>
+  Start with `cookies: true` and `rotateOn429: true` — the most impactful settings. Add `rotateAfterRequests` only if the target applies per-session request quotas.
+</Tip>

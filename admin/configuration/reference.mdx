@@ -135,6 +135,7 @@ The core routing config. Each inbound request is matched against the target list
 | `numRetries` | int | `3` | Retry attempts on failure, each using a different IP |
 | `ipFailuresUntilQuarantine` | int | `5` | Consecutive failures before an IP is quarantined |
 | `quarantineTime` | duration | `120s` | How long a quarantined IP sits out before returning |
+| `identity` | block | — | Per-(IP, target) client identity — see [below](#identity) |
 
 \* Exactly one of `ipPool` or `ipList` must be provided per target.
 
@@ -158,6 +159,35 @@ targets:
     ipFailuresUntilQuarantine: 5
     quarantineTime: 2m
 ```
+
+### identity
+
+Attaches a persistent browser persona to each (IP, target) pair. **Disabled by default** — add the `identity:` block to enable.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `false` | Master switch |
+| `cookies` | bool | `true` | Persist and replay session cookies per IP |
+| `profile` | string | random | Fixed fingerprint profile name. Omit to pick a random profile per identity. Valid values: `chrome-windows`, `chrome-macos`, `safari-macos`, `firefox-windows`, `firefox-linux` |
+| `rotateAfterRequests` | int | — | Voluntarily rotate the identity after this many successful requests. Omit to disable |
+| `rotateOn429` | bool | `true` | Rotate identity immediately on a 429 response |
+| `warmup` | block | — | Warmup request sent through a fresh identity before it enters service |
+| `warmup.enabled` | bool | `true` | Enable the warmup request |
+| `warmup.path` | string | `/` | URL path for the warmup GET request |
+
+```yaml
+identity:
+  enabled: true
+  cookies: true
+  # profile: chrome-windows   # omit for random per identity
+  rotateAfterRequests: 100
+  rotateOn429: true
+  warmup:
+    enabled: true
+    path: /
+```
+
+See [Client Identities](/concepts/identities) for the full concept guide.
 
 ---
 

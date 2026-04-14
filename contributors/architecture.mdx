@@ -16,17 +16,19 @@ description: "How Proxy Hopper is structured internally — components, data flo
           │    TargetManager  (one per target)       │
           │    asyncio queue + dispatcher            │
           │    aiohttp outbound requests + retries   │
-          └────────────────────┬────────────────────┘
-                               │ acquire / record_success / record_failure
-          ┌────────────────────▼────────────────────┐
-          │    IPPool  (one per target)              │
-          │    quarantine policy, cooldown sweeps    │
-          └────────────────────┬────────────────────┘
-                               │ push / pop / counters
-          ┌────────────────────▼────────────────────┐
-          │    IPPoolBackend                         │
-          │    Memory | Redis                        │
-          └─────────────────────────────────────────┘
+          └──────────┬──────────────────┬────────────┘
+                     │ acquire/record   │ get_or_create/rotate
+          ┌──────────▼──────────┐  ┌───▼───────────────────┐
+          │    IPPool           │  │    IdentityStore       │
+          │    quarantine +     │  │    per-(IP,target)     │
+          │    cooldown policy  │  │    fingerprint +       │
+          └──────────┬──────────┘  │    cookie jar          │
+                     │             └───────────────────────┘
+                     │ push / pop / counters
+          ┌──────────▼──────────────────────────┐
+          │    IPPoolBackend                     │
+          │    Memory | Redis                    │
+          └─────────────────────────────────────┘
 ```
 
 ## Key components
@@ -35,15 +37,21 @@ description: "How Proxy Hopper is structured internally — components, data flo
 
 **`ForwardingHandler`** — the single request handler. Reads the `X-Proxy-Hopper-Target` header, resolves the target (matched by regex against the destination URL), and submits the request to the appropriate `TargetManager`.
 
-**`TargetManager`** — one per target. Maintains an asyncio queue of pending requests and dispatches them using `IPPool.acquire()`. Runs the aiohttp outbound requests and handles retry logic — picks a different IP on each retry.
+**`TargetManager`** — one per target. Maintains an asyncio queue of pending requests and dispatches them using `IPPool.acquire()`. Runs the aiohttp outbound requests and handles retry logic — picks a different IP on each retry. When identity is enabled, applies the identity's headers and cookies to each outbound request and updates the cookie jar from each response.
 
-**`IPPool`** — one per target. All quarantine and cooldown policy lives here. Never touches the backend directly — delegates storage to `IPPoolBackend`.
+**`IdentityStore`** — one per target (when `identity.enabled`). Manages a `dict[str, Identity]` keyed by IP address. Creates identities on first use, rotates them on quarantine/429/request-limit, and is notified by `IPPool` before a quarantined IP returns to the pool.
+
+**`IPPool`** — one per target. All quarantine and cooldown policy lives here. Never touches the backend directly — delegates storage to `IPPoolBackend`. Fires an `on_quarantine_release` callback (to `IdentityStore`) before returning quarantined IPs to the pool.
 
 **`IPPoolBackend`** — pure storage interface. Two implementations:
 - `MemoryBackend` — asyncio queues and Python dicts, in-process
 - `RedisBackend` — BLPOP queues and sorted sets, shared across instances
 
 **`IPProber`** — background task that periodically probes each IP through the actual proxy to verify reachability. Updates `ip_reachable` metrics and can trigger quarantine on repeated probe failures.
+
+**`Identity`** — immutable-ish dataclass holding a `FingerprintProfile` (header bundle) and a `dict[str, str]` cookie jar. Applies headers and cookies to outbound requests, parses `Set-Cookie` response headers, and tracks request count for rotation.
+
+**`FingerprintProfile`** — frozen dataclass. Bundles User-Agent, Accept, Accept-Language, and Accept-Encoding headers for a specific browser/OS combination. Five built-in profiles; selected randomly per new identity unless a fixed profile is configured.
 
 ## Design principles
 
@@ -53,9 +61,11 @@ description: "How Proxy Hopper is structured internally — components, data flo
 
 **Backend abstraction** — `IPPoolBackend` is a clean interface. Swapping backends requires no changes above the pool layer.
 
-**No shared mutable state between targets** — each target has its own `TargetManager` and `IPPool` instance. There is no global lock.
+**No shared mutable state between targets** — each target has its own `TargetManager`, `IPPool`, and `IdentityStore` instance. There is no global lock.
 
 **Auth at the boundary** — authentication and target ACL checks happen in `ProxyServer`/`ForwardingHandler` before any routing or IP acquisition. Clean separation of auth logic from proxy logic.
+
+**Identity isolation** — the `IdentityStore` has no knowledge of the pool or HTTP layer. It receives rotation triggers via callbacks and returns identities on demand. Cookie state is stored per identity (not on the shared aiohttp session) so cookies from one IP never leak to another.
 
 ## Source layout
 
@@ -65,11 +75,16 @@ python_modules/
 │   └── src/proxy_hopper/
 │       ├── server.py           # ProxyServer — TCP server, auth check, dispatch
 │       ├── handlers.py         # ForwardingHandler — request handling
-│       ├── target_manager.py   # TargetManager — queue + dispatch + retry
+│       ├── target_manager.py   # TargetManager — queue + dispatch + retry + identity wiring
 │       ├── pool.py             # IPPool — quarantine/cooldown policy
 │       ├── backend/
 │       │   ├── base.py         # IPPoolBackend ABC
 │       │   └── memory.py       # MemoryIPPoolBackend
+│       ├── identity/
+│       │   ├── config.py       # IdentityConfig + WarmupConfig (embedded in TargetConfig)
+│       │   ├── fingerprint.py  # FingerprintProfile — 5 built-in browser profiles
+│       │   ├── identity.py     # Identity — applies headers, manages cookies
+│       │   └── store.py        # IdentityStore — get-or-create + rotation per address
 │       ├── auth.py             # authenticate_token, can_access_target
 │       ├── config.py           # Config models (Pydantic)
 │       ├── metrics.py          # Prometheus metric definitions
@@ -94,7 +109,9 @@ python_modules/
 5. If auth is enabled, target access is verified for the authenticated user
 6. Request is submitted to the matched `TargetManager`'s asyncio queue
 7. `TargetManager` acquires an IP from `IPPool` (waits if none available, up to `maxQueueWait`)
-8. aiohttp makes the HTTPS request to the destination via the acquired proxy IP
-9. On success: IP is returned to pool after `minRequestInterval`; response is streamed back
-10. On failure: `record_failure` is called; if `numRetries > 0`, a different IP is acquired and the request retried
-11. After `ipFailuresUntilQuarantine` consecutive failures on an IP, it is quarantined for `quarantineTime`
+8. If identity is enabled, `IdentityStore.get_or_create(ip)` returns the identity for that IP; its fingerprint headers and cookies are merged into the outbound request
+9. aiohttp makes the HTTPS request to the destination via the acquired proxy IP
+10. On success: any `Set-Cookie` headers are stored in the identity; IP is returned to pool after `minRequestInterval`; response is streamed back. If `rotateAfterRequests` is configured and the threshold is reached, the identity is rotated.
+11. On 429: if `rotateOn429` is true, the identity is rotated immediately
+12. On failure: `record_failure` is called; if `numRetries > 0`, a different IP is acquired and the request retried
+13. After `ipFailuresUntilQuarantine` consecutive failures on an IP, it is quarantined for `quarantineTime`. The `IdentityStore` is notified via callback and rotates the identity before the IP re-enters the pool.

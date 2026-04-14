@@ -52,7 +52,8 @@
             "pages": [
               "concepts/targets",
               "concepts/proxy-providers",
-              "concepts/sending-requests"
+              "concepts/sending-requests",
+              "concepts/identities"
             ]
           },
           {

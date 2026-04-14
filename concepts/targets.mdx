@@ -75,4 +75,35 @@ minRequestInterval: 1s   # 1 req/s per IP
 
 When a request fails (connection error, 429, 5xx), Proxy Hopper automatically picks a different IP and retries. After `ipFailuresUntilQuarantine` consecutive failures on the same IP, it is removed from the pool for `quarantineTime` and then automatically returned.
 
-See [Config Reference](/admin/configuration/reference) for the full list of target fields.
+## Client identity
+
+Each (IP, target) pair can maintain a persistent **client identity** — a browser fingerprint (User-Agent and Accept headers) and a cookie jar that survives across requests through the same IP. This makes consecutive requests through the same IP look like the same browser to the upstream server, reducing bot detection and handling session-level rate limiting.
+
+Identities rotate automatically when:
+- The IP is **quarantined** — a new identity is ready before the IP returns to the pool
+- A **429 response** is received (when `rotateOn429: true`, which is the default)
+- A **request count threshold** is reached (`rotateAfterRequests`)
+
+```yaml
+targets:
+  - name: product-catalogue
+    regex: 'catalogue\.example\.com'
+    ipPool: au-pool
+    minRequestInterval: 10s
+    numRetries: 2
+    ipFailuresUntilQuarantine: 3
+    quarantineTime: 10m
+
+    identity:
+      enabled: true
+      cookies: true               # persist session cookies per IP
+      rotateAfterRequests: 100    # voluntarily shed sessions before quota is hit
+      rotateOn429: true
+      warmup:
+        enabled: true             # prime the identity with a GET before first use
+        path: /
+```
+
+Identity is **disabled by default** — add the `identity:` block to a target to enable it.
+
+See [Client Identities](/concepts/identities) for the full concept guide, or [Config Reference](/admin/configuration/reference#identity) for the field reference.

@@ -31,6 +31,9 @@ Proxy Hopper is useful when your application:
   <Card title="Automatic quarantine" icon="shield">
     IPs that accumulate failures are quarantined for a configurable period, then released back into rotation automatically.
   </Card>
+  <Card title="Client identity" icon="fingerprint">
+    Each (IP, target) pair can carry a persistent browser fingerprint and cookie jar that rotates automatically on quarantine or 429.
+  </Card>
   <Card title="Per-request control" icon="sliders">
     Override retries or attach a metrics tag on individual requests using `X-Proxy-Hopper-*` headers — no config changes required.
   </Card>
