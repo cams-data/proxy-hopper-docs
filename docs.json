@@ -60,6 +60,7 @@
             "pages": [
               {
                 "group": "Configuration",
+                "expanded": true,
                 "pages": [
                   "admin/configuration/reference",
                   "admin/configuration/environment-variables"
@@ -67,6 +68,7 @@
               },
               {
                 "group": "Deployment",
+                "expanded": true,
                 "pages": [
                   {
                     "group": "Docker",
@@ -77,6 +79,7 @@
                   },
                   {
                     "group": "Kubernetes",
+                    "expanded": true,
                     "pages": [
                       "admin/deployment/kubernetes/helm",
                       "admin/deployment/kubernetes/high-availability",
@@ -87,6 +90,7 @@
               },
               {
                 "group": "Authentication",
+                "expanded": true,
                 "pages": [
                   "admin/authentication/overview",
                   "admin/authentication/api-keys",
@@ -103,6 +107,7 @@
               },
               {
                 "group": "Observability",
+                "expanded": true,
                 "pages": [
                   "admin/observability/metrics",
                   "admin/observability/logging"
