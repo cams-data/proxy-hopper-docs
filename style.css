@@ -210,7 +210,13 @@ h1, h2, h3, h4 {
   padding-top: 0.25rem;
   padding-bottom: 0.25rem;
   border-radius: 0;
-  cursor: pointer;
+  pointer-events: none;
+  cursor: default;
+}
+
+/* Hide the expand/collapse chevron */
+#sidebar-group > li[data-group-tag=""] > button > div:last-child {
+  display: none;
 }
 
 #sidebar-group > li[data-group-tag=""] > button:hover,
