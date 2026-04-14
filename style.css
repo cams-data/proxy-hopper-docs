@@ -201,17 +201,15 @@ h1, h2, h3, h4 {
    Nested group buttons (Docker, Kubernetes, SSO Guides) sit inside a child
    <ul> so the > combinator keeps them unaffected.                         */
 #sidebar-group > li[data-group-tag=""] > button {
-  font-size: 0.7rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.07em;
-  color: #6b7280;
-  margin-top: 0.625rem;
+  font-weight: 600;
+  color: #111827;
+  margin-top: 0.5rem;
   padding-top: 0.25rem;
   padding-bottom: 0.25rem;
   border-radius: 0;
   pointer-events: none;
   cursor: default;
+  background: transparent !important;
 }
 
 /* Hide the expand/collapse chevron */
@@ -219,17 +217,20 @@ h1, h2, h3, h4 {
   display: none;
 }
 
-#sidebar-group > li[data-group-tag=""] > button:hover,
-#sidebar-group > li[data-group-tag=""] > button:focus {
-  background: transparent !important;
-  color: #374151;
-}
-
 .dark #sidebar-group > li[data-group-tag=""] > button {
-  color: #9ca3af;
+  color: #e5e7eb;
 }
 
-.dark #sidebar-group > li[data-group-tag=""] > button:hover,
-.dark #sidebar-group > li[data-group-tag=""] > button:focus {
-  color: #d1d5db;
+/* ── Promote top-level section headers (For Administrators, etc.) ── */
+.sidebar-group-header {
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.sidebar-group-header h5 {
+  color: #030712;
+}
+
+.dark .sidebar-group-header h5 {
+  color: #f9fafb;
 }
