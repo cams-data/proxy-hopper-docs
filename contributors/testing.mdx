@@ -1,0 +1,87 @@
+---
+title: "Running Tests"
+description: "How to run the proxy-hopper test suites locally."
+---
+
+## Prerequisites
+
+Install [uv](https://docs.astral.sh/uv/getting-started/installation/).
+
+## Test suites
+
+| Suite | Location | What it tests |
+|---|---|---|
+| Unit tests | `python_modules/proxy-hopper/tests/` | Core package — config, pool, handlers, auth, CLI |
+| Integration tests | `python_modules/proxy-hopper-testserver/tests/` | End-to-end — TargetManager + MockProxy + UpstreamServer |
+| Redis tests | `python_modules/proxy-hopper-redis/tests/` | Redis backend — requires a running Redis instance |
+
+## Running tests
+
+```bash
+# Core unit tests
+cd python_modules/proxy-hopper
+uv sync --all-extras
+uv run pytest
+
+# Integration tests (no external dependencies)
+cd python_modules/proxy-hopper-testserver
+uv sync
+uv run pytest
+
+# Redis backend tests (requires Redis on localhost:6379)
+cd python_modules/proxy-hopper-redis
+uv sync --all-extras
+uv run pytest
+```
+
+## Running Redis locally
+
+```bash
+docker run -d -p 6379:6379 redis:7-alpine
+```
+
+Integration tests run against both the memory backend and a fakeredis backend by default. To run against a real Redis instance:
+
+```bash
+REDIS_URL=redis://localhost:6379/1 uv run pytest
+```
+
+## Test options
+
+```bash
+# Verbose output
+uv run pytest -v
+
+# Short traceback (used in CI)
+uv run pytest --tb=short -q
+
+# Run a specific test file
+uv run pytest tests/test_pool.py
+
+# Run tests matching a keyword
+uv run pytest -k "quarantine"
+
+# Run a specific test class
+uv run pytest tests/test_auth_integration.py::TestApiKeyAuth
+```
+
+## Integration test utilities
+
+The `proxy-hopper-testserver` package provides test doubles for integration tests:
+
+- **`UpstreamServer`** — a controllable aiohttp HTTP server. Set it to respond with 200, 429, 503, hang, or close connections on demand.
+- **`MockProxy`** — a TCP server that simulates an external proxy IP. Can forward, refuse, hang, or return error responses.
+- **`MockProxyPool`** — manages a set of `MockProxy` instances as a named IP pool.
+
+See the [proxy-hopper-testserver README](https://github.com/cams-data/proxy-hopper-v2/blob/main/python_modules/proxy-hopper-testserver/README.md) for full usage.
+
+## CI
+
+Tests run on every push via GitHub Actions. The workflow:
+
+1. Runs the core unit tests
+2. Runs the integration tests (fakeredis)
+3. Runs the Redis backend tests against a real Redis service container
+4. Builds the Docker image and validates it starts correctly
+
+All three suites must pass before a PR can be merged.

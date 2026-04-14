@@ -1,0 +1,82 @@
+---
+title: "Authentication Overview"
+description: "Proxy Hopper's authentication system — when to enable it, what token types are supported, and how access control works."
+---
+
+## Authentication is optional
+
+By default, Proxy Hopper accepts all requests with no authentication. This is fine for private, network-isolated deployments where trust is enforced at the network layer.
+
+Enable authentication when:
+- Proxy Hopper is reachable by multiple services or teams and you need to control who can use it
+- You want to restrict which services can access which targets
+- You are exposing Proxy Hopper outside a trusted network
+
+## Token types
+
+Proxy Hopper supports three ways to authenticate:
+
+| Token type | Best for | Config section |
+|---|---|---|
+| **API keys** | Service-to-service access (scripts, applications) | `auth.apiKeys` |
+| **Local user accounts** | Admin access with username + password | `auth.admin`, `auth.roles` |
+| **SSO (OIDC)** | Enterprise identity providers (Azure AD, Authentik, Keycloak, Okta) | `auth.oidc` |
+
+All three types use the same header for proxy requests:
+
+```
+X-Proxy-Hopper-Auth: Bearer <token>
+```
+
+## How access control works
+
+### For API keys
+
+API keys control access at the target level. Each key has a `targets` list:
+
+- `targets: ["*"]` — the key can send requests to any target
+- `targets: ["maps", "geocoding"]` — the key can only access the named targets
+
+API keys are for proxy access only. They cannot call the admin API.
+
+### For local users and SSO
+
+Users are assigned a **role**. Each role defines which targets it can access. Three roles are built in:
+
+| Role | Proxy access | Target access | Admin API |
+|---|---|---|---|
+| `admin` | Yes | All targets | Yes — full access |
+| `operator` | Yes | All targets | No |
+| `viewer` | No | — | Read-only |
+
+Custom roles can be added in the `auth.roles` section to restrict access to specific targets.
+
+## Enabling authentication
+
+```yaml
+auth:
+  enabled: true
+  jwtSecret: "change-me-to-a-long-random-string"
+```
+
+<Warning>
+  Set `jwtSecret` to a long random string and keep it stable. If omitted, a secret is auto-generated at startup and all issued tokens become invalid on restart.
+
+  Generate a secret:
+  ```bash
+  openssl rand -base64 48
+  ```
+</Warning>
+
+Once `auth.enabled: true` is set:
+
+- All proxy requests must include `X-Proxy-Hopper-Auth: Bearer <token>`
+- Missing token → `401 Authentication required`
+- Invalid/expired token → `401 Invalid or expired token`
+- Valid token but target not permitted → `403`
+
+## Admin API
+
+The admin API (`/health`, `/auth/login`, `/api/v1/status`) runs on a separate port (`adminPort`, default `8081`). It requires the admin API to be enabled and is not affected by proxy auth rules.
+
+See [Config Reference](/admin/configuration/reference#auth) for all auth fields.

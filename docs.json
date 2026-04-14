@@ -41,7 +41,7 @@
         "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Getting Started",
             "pages": [
               "introduction",
               "quickstart"
@@ -50,52 +50,90 @@
           {
             "group": "Concepts",
             "pages": [
-              {
-                "group": "Forwarding mode",
-                "pages": [
-                  "concepts/proxy-modes",
-                  "concepts/proxy-modes/url-forwarding"
-                ]
-              },
-              {
-                "group": "Backends",
-                "pages": [
-                  "concepts/backends",
-                  "concepts/backends/memory",
-                  "concepts/backends/redis"
-                ]
-              }
+              "concepts/targets",
+              "concepts/proxy-providers",
+              "concepts/sending-requests"
             ]
-          },
+          }
+        ]
+      },
+      {
+        "tab": "For Administrators",
+        "groups": [
           {
             "group": "Configuration",
             "pages": [
-              "configuration/reference",
-              "configuration/proxy-providers",
-              "configuration/ip-pools",
-              "configuration/targets",
-              "configuration/server"
+              "admin/configuration/reference",
+              "admin/configuration/environment-variables"
             ]
           },
           {
             "group": "Deployment",
             "pages": [
-              "deployment/docker",
-              "deployment/kubernetes"
+              {
+                "group": "Docker",
+                "pages": [
+                  "admin/deployment/docker/simple",
+                  "admin/deployment/docker/advanced"
+                ]
+              },
+              {
+                "group": "Kubernetes",
+                "pages": [
+                  "admin/deployment/kubernetes/helm",
+                  "admin/deployment/kubernetes/high-availability",
+                  "admin/deployment/kubernetes/monitoring"
+                ]
+              }
+            ]
+          },
+          {
+            "group": "Authentication",
+            "pages": [
+              "admin/authentication/overview",
+              "admin/authentication/api-keys",
+              "admin/authentication/user-based",
+              "admin/authentication/sso",
+              {
+                "group": "SSO Guides",
+                "pages": [
+                  "admin/authentication/sso-guides/authentik",
+                  "admin/authentication/sso-guides/azure"
+                ]
+              }
             ]
           },
           {
             "group": "Observability",
             "pages": [
-              "observability/metrics",
-              "observability/logging"
+              "admin/observability/metrics",
+              "admin/observability/logging"
             ]
-          },
+          }
+        ]
+      },
+      {
+        "tab": "For Developers",
+        "groups": [
           {
-            "group": "Development",
+            "group": "For Developers",
             "pages": [
-              "development/architecture",
-              "development/testing"
+              "developers/getting-started",
+              "developers/migrating",
+              "developers/authenticating"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "For Contributors",
+        "groups": [
+          {
+            "group": "For Contributors",
+            "pages": [
+              "contributors/architecture",
+              "contributors/testing",
+              "contributors/contributing"
             ]
           }
         ]

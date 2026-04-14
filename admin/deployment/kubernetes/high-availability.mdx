@@ -1,0 +1,169 @@
+---
+title: "High Availability"
+description: "Run Proxy Hopper at scale with HPA, Redis, and production hardening."
+---
+
+## Overview
+
+Proxy Hopper is stateless beyond its IP pool state. With Redis as the backend, multiple replicas share a single pool — each IP is checked out to exactly one replica at a time via Redis `BLPOP` atomicity. This makes horizontal scaling straightforward.
+
+## HorizontalPodAutoscaler
+
+```yaml
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+```
+
+<Note>
+  HPA with multiple replicas **requires the Redis backend**. The in-memory backend gives each pod its own independent pool state — IPs may be used concurrently across pods and quarantine state is not shared.
+</Note>
+
+## Redis for HA
+
+Use a managed Redis service for production rather than the bundled Bitnami subchart:
+
+```yaml
+backend:
+  type: redis
+  redis:
+    url: redis://my-managed-redis:6379/0
+
+redis:
+  enabled: false   # disable bundled subchart
+```
+
+Managed Redis options:
+- **AWS** — ElastiCache for Redis
+- **GCP** — Cloud Memorystore
+- **Azure** — Azure Cache for Redis
+- **Self-hosted** — Redis Sentinel or Redis Cluster with persistence enabled
+
+## PodDisruptionBudget
+
+Maintain minimum availability during node drain and rolling upgrades:
+
+```yaml
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: proxy-hopper
+  namespace: proxy-hopper
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: proxy-hopper
+```
+
+The Helm chart does not create a PDB automatically — apply this separately.
+
+## Resource requests and limits
+
+Proxy Hopper is I/O-bound. CPU usage is low; memory scales with the number of open connections.
+
+```yaml
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+```
+
+Start conservative and adjust based on observed usage (`kubectl top pods`).
+
+## Health probes
+
+Proxy Hopper exposes readiness and liveness endpoints. The Helm chart configures these automatically, but if you are deploying manually:
+
+```yaml
+livenessProbe:
+  httpGet:
+    path: /health
+    port: admin   # admin API port (default 8081)
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: admin
+  initialDelaySeconds: 3
+  periodSeconds: 5
+```
+
+The admin API must be enabled for health endpoints to be available:
+
+```yaml
+admin:
+  enabled: true
+  port: 8081
+```
+
+## Example: full HA values file
+
+```yaml
+replicaCount: 2
+
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 80
+
+backend:
+  type: redis
+  redis:
+    url: redis://my-managed-redis:6379/0
+
+redis:
+  enabled: false
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+admin:
+  enabled: true
+  port: 8081
+
+config:
+  existingSecret: proxy-hopper-config
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: proxy-hopper.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+```
+
+## Production checklist
+
+<AccordionGroup>
+  <Accordion title="Use a Secret for config with auth">
+    If auth is enabled, store the config in a Kubernetes Secret and reference it with `config.existingSecret`. Credentials in `config.inline` end up in Helm release history.
+  </Accordion>
+  <Accordion title="Use managed Redis">
+    The bundled Redis subchart is convenient for development but not hardened for production. Use a managed service with persistence and replication enabled.
+  </Accordion>
+  <Accordion title="Set resource requests and limits">
+    Without resource limits, a traffic spike can starve other pods on the node. Set limits based on observed memory usage under load.
+  </Accordion>
+  <Accordion title="Add a PodDisruptionBudget">
+    Ensure at least one replica remains available during node maintenance or rolling upgrades.
+  </Accordion>
+  <Accordion title="Enable the admin API for health checks">
+    The `/health` endpoint on the admin port is the most reliable liveness/readiness signal. Enable `admin.enabled: true` in your values.
+  </Accordion>
+</AccordionGroup>

@@ -1,17 +1,26 @@
 ---
 title: "Introduction"
-description: "A rotating HTTPS proxy server that routes outbound requests through a pool of external proxy IP addresses — with full retry support."
+description: "What Proxy Hopper is, how it works, and when to use it."
 ---
 
 ## What is Proxy Hopper?
 
-Proxy Hopper sits between your application and the internet. It picks an IP from your pool, makes the HTTPS request itself, and retries on failure by rotating to a different IP — automatically quarantining broken proxies along the way.
+Proxy Hopper sits between your application and the internet. When your application needs to call a third-party API, it sends the request to Proxy Hopper instead. Proxy Hopper picks an IP from your pool, makes the HTTPS request on your behalf, and returns the response — retrying on failure by rotating to a different IP and automatically quarantining broken proxies along the way.
 
 ```
 Your app ─── X-Proxy-Hopper-Target: https://api.example.com ──► Proxy Hopper ──► proxy IP ──► api.example.com
 ```
 
-Because Proxy Hopper owns the full HTTPS connection, it can retry on 429 or 5xx responses. A CONNECT tunnel cannot — the TLS handshake happens inside the tunnel, out of reach.
+Because Proxy Hopper owns the full HTTPS connection, it can retry on 429 or 5xx responses using a fresh IP without your application ever knowing a failure occurred.
+
+## When to use it
+
+Proxy Hopper is useful when your application:
+
+- Makes outbound API requests at scale and hits rate limits per IP
+- Needs to rotate through a pool of IPs to avoid blocks
+- Requires automatic retry and failure recovery without building it yourself
+- Needs per-API rate limit policies without coupling them to your application code
 
 ## Key features
 
@@ -36,13 +45,13 @@ Because Proxy Hopper owns the full HTTPS connection, it can retry on 429 or 5xx 
   <Card title="Quick start" icon="rocket" href="/quickstart">
     Install, configure, and send your first request in minutes.
   </Card>
-  <Card title="Config reference" icon="sliders" href="/configuration/reference">
-    Full reference for all configuration fields and environment variables.
+  <Card title="Targets" icon="crosshairs" href="/concepts/targets">
+    Understand how targets work — the core routing concept.
   </Card>
-  <Card title="Docker & Compose" icon="docker" href="/deployment/docker">
+  <Card title="Docker deployment" icon="docker" href="/admin/deployment/docker/simple">
     Deploy with Docker or Docker Compose.
   </Card>
-  <Card title="Kubernetes" icon="dharmachakra" href="/deployment/kubernetes">
-    Deploy on Kubernetes with Redis for HA.
+  <Card title="Kubernetes" icon="dharmachakra" href="/admin/deployment/kubernetes/helm">
+    Deploy on Kubernetes with the official Helm chart.
   </Card>
 </CardGroup>

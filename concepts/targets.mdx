@@ -1,0 +1,78 @@
+---
+title: "Targets"
+description: "Targets represent the third-party APIs you want to route requests through Proxy Hopper. Each target has its own IP pool, rate limit policy, and retry behaviour."
+---
+
+## What is a target?
+
+A **target** is Proxy Hopper's representation of a third-party API or service. When a request arrives, Proxy Hopper matches its destination URL against your list of targets to decide which pool of proxy IPs to use and which policies to apply.
+
+Every target defines:
+
+- **What URLs it handles** — a regex pattern matched against the full request URL
+- **Which IPs to use** — a dedicated pool of external proxy IPs
+- **How fast to send** — how long to hold each IP off the pool between requests (respecting the API's rate limits)
+- **How to recover from failures** — how many retries and when to quarantine a broken IP
+
+## Why per-target policies?
+
+Different APIs have different tolerance for request frequency and different failure characteristics. A geocoding API might allow 5 requests per second per IP; a product catalogue scraper might need 10 seconds between requests per IP. Proxy Hopper lets you tune each target independently without them affecting each other.
+
+```yaml
+targets:
+  - name: geocoding-api
+    regex: 'maps\.googleapis\.com'
+    ipPool: us-pool
+    minRequestInterval: 200ms   # fast API, 5 req/s per IP
+    numRetries: 3
+    ipFailuresUntilQuarantine: 5
+    quarantineTime: 2m
+
+  - name: product-catalogue
+    regex: 'catalogue\.example\.com'
+    ipPool: au-pool
+    minRequestInterval: 10s     # slow site, 1 req per 10s per IP
+    maxQueueWait: 120s
+    numRetries: 2
+    ipFailuresUntilQuarantine: 3
+    quarantineTime: 10m
+```
+
+## Matching
+
+Targets are evaluated **top-to-bottom**. The first target whose regex matches the destination URL handles the request. Put more specific patterns above general catch-all patterns.
+
+```yaml
+targets:
+  - name: maps                     # matched first for Google Maps URLs
+    regex: 'maps\.googleapis\.com'
+    ...
+
+  - name: google-apis              # matched next for any googleapis.com URL
+    regex: '\.googleapis\.com'
+    ...
+
+  - name: general                  # catch-all for everything else
+    regex: '.*'
+    ...
+```
+
+If no target matches, Proxy Hopper returns a `503` with a `no_match` outcome in metrics.
+
+## IP isolation
+
+Each target maintains its own **independent** IP rotation and quarantine state, even when two targets reference the same IP pool definition. Quarantining an IP for one target does not affect its availability for another.
+
+## Rate limiting
+
+`minRequestInterval` is the primary rate-limiting knob. After any request through an IP, that IP is held off the pool for this duration. With 10 IPs and `minRequestInterval: 1s` you can sustain ~10 requests per second to that target.
+
+```yaml
+minRequestInterval: 1s   # 1 req/s per IP
+```
+
+## Retries and quarantine
+
+When a request fails (connection error, 429, 5xx), Proxy Hopper automatically picks a different IP and retries. After `ipFailuresUntilQuarantine` consecutive failures on the same IP, it is removed from the pool for `quarantineTime` and then automatically returned.
+
+See [Config Reference](/admin/configuration/reference) for the full list of target fields.

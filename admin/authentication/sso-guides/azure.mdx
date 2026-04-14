@@ -1,0 +1,121 @@
+---
+title: "Azure Active Directory"
+description: "Configure Azure AD (Entra ID) as an OIDC identity provider for Proxy Hopper."
+---
+
+## Overview
+
+This guide configures Azure Active Directory (now called Microsoft Entra ID) to issue OIDC tokens for Proxy Hopper. It uses the **client credentials** flow for machine-to-machine access and the **roles claim** to carry Proxy Hopper role assignments.
+
+## Prerequisites
+
+- Azure subscription with an Azure AD tenant
+- Permission to register applications in Azure AD
+- Proxy Hopper with `auth.enabled: true`
+
+## Step 1 — Register an application
+
+1. Go to the [Azure portal](https://portal.azure.com) → **Azure Active Directory → App registrations → New registration**
+2. Configure:
+   - **Name**: `Proxy Hopper`
+   - **Supported account types**: `Accounts in this organizational directory only`
+   - **Redirect URI**: leave blank (not needed for client credentials)
+3. Click **Register** and note the **Application (client) ID** and **Directory (tenant) ID**
+
+## Step 2 — Create a client secret
+
+1. In your app registration, go to **Certificates & secrets → New client secret**
+2. Set a description and expiry
+3. Copy the **Value** immediately — Azure only shows it once
+
+## Step 3 — Define app roles
+
+App roles carry the Proxy Hopper role in the token.
+
+1. In your app registration, go to **App roles → Create app role**
+2. Create roles for each Proxy Hopper role you need:
+
+| Display name | Value | Description |
+|---|---|---|
+| `Proxy Hopper Admin` | `admin` | Full proxy and admin API access |
+| `Proxy Hopper Operator` | `operator` | Full proxy access, no admin API |
+| `Proxy Hopper Data Team` | `data-team` | Access to analytics targets only |
+
+For each role:
+- **Allowed member types**: `Applications` (for service accounts) or `Users and groups` (for human users)
+- **Value**: the exact role name that Proxy Hopper will see in the claim
+
+## Step 4 — Assign roles to users or service principals
+
+1. Go to **Enterprise applications → Proxy Hopper → Users and groups → Add user/group**
+2. Select users, groups, or service principals
+3. Assign the appropriate role
+
+For machine access using the client credentials flow, assign the role to the **service principal** of the calling application.
+
+## Step 5 — Expose the roles claim in tokens
+
+By default, Azure includes app roles in the `roles` claim of access tokens. Confirm this:
+
+1. In your app registration, go to **Token configuration → Add optional claim**
+2. Token type: **Access**
+3. Add the `roles` claim if not already present
+
+## Step 6 — Configure Proxy Hopper
+
+```yaml
+auth:
+  enabled: true
+  jwtSecret: "change-me-to-a-long-random-string"
+
+  oidc:
+    issuerUrl: "https://login.microsoftonline.com/<tenant-id>/v2.0"
+    clientId: "<application-client-id>"
+    clientSecret: "<client-secret-value>"
+    roleClaimPath: "roles"      # Azure uses the 'roles' claim (array — first element is used)
+    audience: "<application-client-id>"
+
+  roles:
+    data-team:
+      targets: ["analytics", "general"]
+```
+
+<Note>
+  The Azure `roles` claim is an array. Proxy Hopper reads the first element. If users may have multiple roles, assign only one role per service principal to avoid ambiguity.
+</Note>
+
+The `issuerUrl` for Azure AD v2.0 is `https://login.microsoftonline.com/<tenant-id>/v2.0`.
+
+## Step 7 — Test with client credentials
+
+```bash
+TOKEN=$(curl -s -X POST \
+  "https://login.microsoftonline.com/<tenant-id>/oauth2/v2.0/token" \
+  -d "grant_type=client_credentials" \
+  -d "client_id=<client-id>" \
+  -d "client_secret=<client-secret>" \
+  -d "scope=<application-client-id>/.default" \
+  | jq -r '.access_token')
+
+curl -H "X-Proxy-Hopper-Target: https://api.example.com" \
+     -H "X-Proxy-Hopper-Auth: Bearer $TOKEN" \
+     http://proxy-hopper:8080/get
+```
+
+Note the `scope` value: `<application-client-id>/.default` — this requests the app's own scopes and is required for the `roles` claim to be included.
+
+## Troubleshooting
+
+**`401 Invalid or expired token`**
+- Confirm the `audience` in Proxy Hopper config matches the `aud` claim in the token
+- Decode the token to inspect: `echo $TOKEN | cut -d. -f2 | base64 -d | jq .`
+- Verify the `issuerUrl` includes your tenant ID
+
+**`403` on target access**
+- Confirm the role is assigned to the service principal (not just the app registration)
+- Verify the `roles` claim is present in the decoded token
+- Check the role value exactly matches a built-in or custom role name in Proxy Hopper config
+
+**Roles claim missing**
+- Azure only includes app roles in access tokens when the scope is `<app-id>/.default`
+- Ensure `Token configuration → Access token → roles` is enabled

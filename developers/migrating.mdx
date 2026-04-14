@@ -1,0 +1,144 @@
+---
+title: "Migrating to Proxy Hopper"
+description: "How to migrate an existing application to send requests through Proxy Hopper."
+---
+
+## Migration approach
+
+Proxy Hopper requires a single code change: instead of calling the third-party API directly, point your HTTP client at Proxy Hopper and add the `X-Proxy-Hopper-Target` header.
+
+The migration is typically done per-client or per-service and can be rolled out incrementally.
+
+## Migrating from direct API calls
+
+**Before:**
+```python
+import requests
+
+resp = requests.get(
+    "https://api.example.com/v1/search",
+    params={"q": "test"},
+    headers={"Authorization": "Bearer api_key"},
+)
+```
+
+**After:**
+```python
+import requests
+
+session = requests.Session()
+session.headers["X-Proxy-Hopper-Target"] = "https://api.example.com"
+
+resp = session.get(
+    "http://proxy-hopper:8080/v1/search",
+    params={"q": "test"},
+    headers={"Authorization": "Bearer api_key"},   # your upstream API key — kept as-is
+)
+```
+
+Your upstream API credentials (`Authorization`, `X-API-Key`, etc.) are passed through to the destination unchanged. Only `X-Proxy-Hopper-*` headers are consumed and stripped by Proxy Hopper.
+
+## Migrating from a standard HTTP proxy
+
+If your application was previously using an HTTP proxy via environment variables or proxy settings, the migration is straightforward.
+
+**Before** (proxy via `requests` proxy settings):
+```python
+proxies = {"https": "http://old-proxy:8080"}
+resp = requests.get("https://api.example.com/v1/data", proxies=proxies)
+```
+
+**After** (Proxy Hopper via header):
+```python
+session = requests.Session()
+session.headers["X-Proxy-Hopper-Target"] = "https://api.example.com"
+resp = session.get("http://proxy-hopper:8080/v1/data")
+```
+
+The key differences:
+- Remove proxy settings from your client configuration
+- Set `X-Proxy-Hopper-Target` on the session
+- Change the base URL to point at Proxy Hopper
+
+## Migrating multiple API integrations
+
+For applications that call several different APIs, use one session per API:
+
+```python
+maps_session = requests.Session()
+maps_session.headers["X-Proxy-Hopper-Target"] = "https://maps.googleapis.com"
+
+analytics_session = requests.Session()
+analytics_session.headers["X-Proxy-Hopper-Target"] = "https://analytics-api.example.com"
+```
+
+Or use a helper to create sessions:
+
+```python
+PROXY_HOPPER = "http://proxy-hopper:8080"
+
+def proxy_session(target: str, api_key: str | None = None) -> requests.Session:
+    session = requests.Session()
+    session.headers["X-Proxy-Hopper-Target"] = target
+    if api_key:
+        session.headers["X-Proxy-Hopper-Auth"] = f"Bearer {api_key}"
+    return session
+
+maps = proxy_session("https://maps.googleapis.com")
+analytics = proxy_session("https://analytics-api.example.com", api_key="ph_mykey")
+```
+
+## httpx migration
+
+```python
+# Before
+import httpx
+client = httpx.Client()
+resp = client.get("https://api.example.com/v1/data")
+
+# After
+client = httpx.Client(
+    base_url="http://proxy-hopper:8080",
+    headers={"X-Proxy-Hopper-Target": "https://api.example.com"},
+)
+resp = client.get("/v1/data")
+```
+
+## aiohttp migration
+
+```python
+# Before
+async with aiohttp.ClientSession() as session:
+    async with session.get("https://api.example.com/v1/data") as resp:
+        data = await resp.json()
+
+# After
+async with aiohttp.ClientSession(
+    headers={"X-Proxy-Hopper-Target": "https://api.example.com"}
+) as session:
+    async with session.get("http://proxy-hopper:8080/v1/data") as resp:
+        data = await resp.json()
+```
+
+## Verifying the migration
+
+1. Check the Proxy Hopper logs — you should see requests being dispatched for your target
+2. Verify responses are as expected
+3. Check Prometheus metrics (if enabled) — `proxy_hopper_requests_total` should show new requests
+
+```bash
+# Quick check — confirm requests are going through Proxy Hopper
+curl -H "X-Proxy-Hopper-Target: https://httpbin.org" http://proxy-hopper:8080/get
+```
+
+## Non-idempotent requests
+
+If you have `POST`, `PUT`, `PATCH`, or `DELETE` calls, set retries to `0` to avoid duplicate actions on failure:
+
+```python
+resp = session.post(
+    "http://proxy-hopper:8080/v1/orders",
+    json=payload,
+    headers={"X-Proxy-Hopper-Retries": "0"},
+)
+```

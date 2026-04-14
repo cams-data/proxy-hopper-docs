@@ -1,0 +1,143 @@
+---
+title: "API Key Authentication"
+description: "Configure API keys for service-to-service access to Proxy Hopper."
+---
+
+## Overview
+
+API keys are the simplest way to authenticate service-to-service access. Each key is a pre-shared secret that a service includes in every request. Keys are configured in `config.yaml` — there is no runtime key management API.
+
+API keys are for proxy access only. They cannot call the admin API (`/auth/login`, `/api/v1/status`, etc.).
+
+## Configuration
+
+```yaml
+auth:
+  enabled: true
+  jwtSecret: "change-me-to-a-long-random-string"
+
+  apiKeys:
+    - name: my-service
+      key: "ph_changeme"
+      targets: ["*"]          # allow all targets
+
+    - name: reporting
+      key: "ph_reporting_key"
+      targets: ["analytics"]  # restrict to one target
+
+    - name: multi-target
+      key: "ph_multi_key"
+      targets: ["maps", "geocoding", "general"]
+```
+
+### Fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | required | Identifier used in logs and error messages |
+| `key` | string | required | The secret key string sent in the `Authorization` header |
+| `targets` | list | `["*"]` | Target names this key can access. `["*"]` = all targets. |
+
+## Generating keys
+
+Generate a random key:
+
+```bash
+openssl rand -base64 32
+# → 3NQWP3cGsF3Oq7W0dZHKYLhKiUuJHUWbpuB/N7xfgsc=
+
+# Or a URL-safe variant with a prefix for easy identification
+python -c "import secrets; print('ph_' + secrets.token_urlsafe(32))"
+# → ph_dK3X9vN7mQ2pL8tR5wJ6yF1hC4uG0sB3nE7zA9xV2qI
+```
+
+Use a prefix like `ph_` to make API keys recognisable in logs and config files.
+
+## Sending requests
+
+Include the key in the `X-Proxy-Hopper-Auth` header on every request:
+
+<CodeGroup>
+
+```bash curl
+curl -H "X-Proxy-Hopper-Target: https://api.example.com" \
+     -H "X-Proxy-Hopper-Auth: Bearer ph_mykey" \
+     http://proxy-hopper:8080/v1/endpoint
+```
+
+```python requests
+import requests
+
+session = requests.Session()
+session.headers.update({
+    "X-Proxy-Hopper-Target": "https://api.example.com",
+    "X-Proxy-Hopper-Auth": "Bearer ph_mykey",
+})
+
+resp = session.get("http://proxy-hopper:8080/v1/endpoint")
+```
+
+```python httpx
+import httpx
+
+client = httpx.Client(
+    base_url="http://proxy-hopper:8080",
+    headers={
+        "X-Proxy-Hopper-Target": "https://api.example.com",
+        "X-Proxy-Hopper-Auth": "Bearer ph_mykey",
+    },
+)
+resp = client.get("/v1/endpoint")
+```
+
+```python aiohttp
+import aiohttp
+
+async with aiohttp.ClientSession(headers={
+    "X-Proxy-Hopper-Target": "https://api.example.com",
+    "X-Proxy-Hopper-Auth": "Bearer ph_mykey",
+}) as session:
+    async with session.get("http://proxy-hopper:8080/v1/endpoint") as resp:
+        print(resp.status)
+```
+
+</CodeGroup>
+
+## Target restrictions
+
+When `targets` is a named list (not `["*"]`), the key is rejected with `403` if the request matches a target not in the list:
+
+```yaml
+apiKeys:
+  - name: maps-only
+    key: "ph_maps_key"
+    targets: ["google-maps"]   # only the google-maps target
+```
+
+```bash
+# Request to google-maps target — allowed
+curl -H "X-Proxy-Hopper-Target: https://maps.googleapis.com" \
+     -H "X-Proxy-Hopper-Auth: Bearer ph_maps_key" \
+     http://proxy-hopper:8080/json
+
+# Request to a different target — 403
+curl -H "X-Proxy-Hopper-Target: https://api.example.com" \
+     -H "X-Proxy-Hopper-Auth: Bearer ph_maps_key" \
+     http://proxy-hopper:8080/data
+# → 403 API key 'maps-only' is not permitted to access target 'general'
+```
+
+## Error responses
+
+| Status | Message | Cause |
+|---|---|---|
+| `401` | `Authentication required` | `X-Proxy-Hopper-Auth` header missing |
+| `401` | `Invalid or expired token` | Key not found in config |
+| `403` | `API key '...' is not permitted to access target '...'` | Key's `targets` list does not include the matched target |
+
+## Security notes
+
+- Store keys in secrets management (Vault, AWS Secrets Manager, Kubernetes Secrets) — not in plain environment variables or source control
+- Rotate keys by adding the new key alongside the old one, deploying, updating clients, then removing the old key
+- Use the `name` field to make log attribution easy — key names appear in `403` messages and logs
+- There is no key expiry — rotate compromised keys immediately by removing them from `config.yaml` and reloading

@@ -9,7 +9,7 @@ mode: "custom"
 <div className="overview-hero">
   <img src="/logo/light.svg" alt="Proxy Hopper" className="overview-hero-logo logo-light"/>
   <img src="/logo/dark.svg" alt="Proxy Hopper" className="overview-hero-logo logo-dark"/>
-  <p>A rotating HTTP/HTTPS proxy server that routes outbound requests through a pool of external proxy IP addresses — with automatic retries, failure tracking, and IP quarantine.</p>
+  <p>A rotating HTTPS proxy server that routes outbound requests through a pool of external proxy IP addresses — with automatic retries, failure tracking, and IP quarantine.</p>
   <div className="overview-hero-buttons">
     <a href="/quickstart" className="btn-primary">Get started →</a>
     <a href="https://github.com/cams-data/proxy-hopper-v2" className="btn-secondary">GitHub</a>
@@ -35,8 +35,6 @@ mode: "custom"
 <img src="/images/diagram-light.svg" alt="Proxy Hopper architecture" className="overview-diagram block dark:hidden"/>
 <img src="/images/diagram-dark.svg" alt="Proxy Hopper architecture" className="overview-diagram hidden dark:block"/>
 
-<p className="mb-xl">Point your HTTP client at Proxy Hopper as its proxy. Proxy Hopper handles everything else.</p>
-
 <hr/>
 
 <h2 className="mb-lg">How it works</h2>
@@ -45,8 +43,8 @@ mode: "custom"
   <Step title="Configure your proxy providers and targets">
     Define your external proxy IPs — grouped by provider with credentials and region tags. Set targets as URL regex patterns, each with its own pool, rate limit, and retry policy.
   </Step>
-  <Step title="Point your HTTP client at Proxy Hopper">
-    Use standard HTTP proxy settings, HTTPS CONNECT tunnels, or forwarding mode. No changes to your application logic.
+  <Step title="Point your application at Proxy Hopper">
+    Add one header to your HTTP requests: <code>X-Proxy-Hopper-Target</code> set to the real destination. No changes to your application logic.
   </Step>
   <Step title="Proxy Hopper handles the rest">
     IP rotation, rate limiting between requests, automatic quarantine of failing IPs, retries on failure, and health probing in the background.
@@ -65,10 +63,10 @@ mode: "custom"
     IPs that accumulate failures are quarantined automatically and released back into rotation after a configurable timeout.
   </Card>
   <Card title="Per-target policies" icon="sliders">
-    Different targets can have different rate limits, retry counts, and quarantine thresholds — match the policy to the site.
+    Different targets can have different rate limits, retry counts, and quarantine thresholds — match the policy to the API.
   </Card>
-  <Card title="Three integration modes" icon="plug">
-    HTTP proxy, HTTPS CONNECT tunnel, and URL-forwarding — all using the same rotation and retry logic.
+  <Card title="Full retry support" icon="arrows-rotate">
+    Proxy Hopper owns the HTTPS connection end-to-end, so it can retry any failed request on a different IP — including mid-flight 429s and 5xx errors.
   </Card>
   <Card title="Redis HA" icon="server">
     In-memory backend for single-instance deployments. Redis backend for multi-instance HA with shared pool state.
@@ -77,43 +75,6 @@ mode: "custom"
     Full observability — request rates, retry counts, queue depth, quarantine events, and per-IP probe status.
   </Card>
 </CardGroup>
-
-<hr/>
-
-<h2>Three integration modes</h2>
-
-<p>Proxy Hopper supports three ways for clients to send requests. All three use the same IP rotation and retry logic.</p>
-
-<table className="overview-table">
-  <thead>
-    <tr>
-      <th>Mode</th>
-      <th>How to use</th>
-      <th>HTTPS retries</th>
-    </tr>
-  </thead>
-  <tbody>
-    <tr>
-      <td><strong>HTTP proxy</strong></td>
-      <td><code>http_proxy=http://proxy-hopper:8080</code></td>
-      <td>Yes</td>
-    </tr>
-    <tr>
-      <td><strong>CONNECT tunnel</strong></td>
-      <td><code>https_proxy=http://proxy-hopper:8080</code></td>
-      <td>No — tunnel is opaque</td>
-    </tr>
-    <tr>
-      <td><strong>URL forwarding</strong></td>
-      <td><code>X-Proxy-Hopper-Target</code> header</td>
-      <td>Yes — recommended for APIs</td>
-    </tr>
-  </tbody>
-</table>
-
-<Tip>
-  Use forwarding mode for HTTPS APIs where you need retry support. CONNECT tunnels are opaque byte relays — Proxy Hopper cannot retry a mid-flight failure once the TLS handshake is complete.
-</Tip>
 
 <hr/>
 
@@ -133,22 +94,22 @@ targets:
 
 ```bash
 docker run -v $(pwd)/config.yaml:/etc/proxy-hopper/config.yaml \
+  -p 8080:8080 \
   ghcr.io/cams-data/proxy-hopper:latest
 ```
 
 ```python
 import requests
-resp = requests.get(
-    "https://example.com",
-    proxies={"https": "http://localhost:8080"}
-)
+session = requests.Session()
+session.headers["X-Proxy-Hopper-Target"] = "https://api.example.com"
+resp = session.get("http://localhost:8080/v1/endpoint")
 ```
 
 <CardGroup cols={2}>
   <Card title="Full quick start" icon="rocket" href="/quickstart">
-    Step-by-step guide with providers, pools, and all three integration modes.
+    Step-by-step guide with providers, pools, and a first proxied request.
   </Card>
-  <Card title="Docker images" icon="docker" href="/deployment/docker">
+  <Card title="Docker images" icon="docker" href="/admin/deployment/docker/simple">
     Pre-built multi-arch images for amd64 and arm64.
   </Card>
 </CardGroup>
@@ -158,14 +119,14 @@ resp = requests.get(
 <h2 className="mb-lg">Deployment options</h2>
 
 <CardGroup cols={3}>
-  <Card title="Single container" icon="box" href="/deployment/docker">
+  <Card title="Single container" icon="box" href="/admin/deployment/docker/simple">
     In-memory backend. Zero external dependencies. Good for development and single-host deployments.
   </Card>
-  <Card title="Docker Compose + Redis" icon="layer-group" href="/deployment/docker#docker-compose-with-redis">
+  <Card title="Docker Compose + Redis" icon="layer-group" href="/admin/deployment/docker/advanced">
     Redis backend. Survives restarts. Scale to multiple replicas sharing a single IP pool.
   </Card>
-  <Card title="Kubernetes" icon="dharmachakra" href="/deployment/kubernetes">
-    Full manifests — Deployment, HPA, Redis StatefulSet, Services. Scales automatically with traffic.
+  <Card title="Kubernetes" icon="dharmachakra" href="/admin/deployment/kubernetes/helm">
+    Official Helm chart — Deployment, HPA, Redis subchart, ServiceMonitor. Scales automatically with traffic.
   </Card>
 </CardGroup>
 

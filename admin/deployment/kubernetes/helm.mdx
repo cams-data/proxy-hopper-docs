@@ -1,0 +1,154 @@
+---
+title: "Deploying with Helm"
+description: "Install Proxy Hopper on Kubernetes using the official Helm chart."
+---
+
+## Prerequisites
+
+- Kubernetes 1.25+
+- Helm 3.8+
+
+## Install
+
+```bash
+helm install proxy-hopper oci://ghcr.io/cams-data/helm/proxy-hopper \
+  --namespace proxy-hopper \
+  --create-namespace
+```
+
+This deploys a single-instance Proxy Hopper with the in-memory backend using the default config.
+
+## Supplying your config
+
+### Inline config (simplest)
+
+Pass your `config.yaml` content as a Helm value:
+
+```bash
+helm install proxy-hopper oci://ghcr.io/cams-data/helm/proxy-hopper \
+  --namespace proxy-hopper \
+  --create-namespace \
+  --set-file config.inline=config.yaml
+```
+
+Or in a `values.yaml` file:
+
+```yaml
+config:
+  inline: |
+    proxyProviders:
+      - name: my-provider
+        auth:
+          type: basic
+          username: user
+          password: secret
+        ipList:
+          - "10.0.0.1:3128"
+          - "10.0.0.2:3128"
+        regionTag: US-East
+
+    targets:
+      - name: general
+        regex: '.*'
+        ipPool: my-pool
+        minRequestInterval: 1s
+        numRetries: 3
+```
+
+```bash
+helm install proxy-hopper oci://ghcr.io/cams-data/helm/proxy-hopper \
+  --namespace proxy-hopper \
+  --create-namespace \
+  -f values.yaml
+```
+
+### Existing ConfigMap or Secret
+
+If you manage config separately (via an operator, external-secrets, or sealed-secrets), reference it:
+
+```yaml
+# Reference a ConfigMap — key must be "config.yaml"
+config:
+  existingConfigMap: my-proxy-hopper-config
+
+# Or reference a Secret (recommended when auth is enabled)
+config:
+  existingSecret: my-proxy-hopper-secret
+```
+
+<Warning>
+  When `auth` is enabled in your config (API keys, JWT, OIDC), use `existingSecret` rather than `config.inline` in a values file. Credentials in plain values files can end up in version control or Helm release history.
+
+  Create the secret with:
+  ```bash
+  kubectl create secret generic proxy-hopper-config \
+    --namespace proxy-hopper \
+    --from-file=config.yaml=./config-with-auth.yaml
+  ```
+</Warning>
+
+## Redis backend
+
+Enable the bundled Redis subchart for pool state persistence and multi-instance HA:
+
+```yaml
+backend:
+  type: redis
+
+redis:
+  enabled: true
+  architecture: standalone
+  auth:
+    enabled: false
+  master:
+    persistence:
+      size: 1Gi
+```
+
+The chart automatically selects the `-redis` Docker image and wires the Redis URL when `backend.type: redis` is set.
+
+To use an external Redis instance instead of the bundled subchart:
+
+```yaml
+backend:
+  type: redis
+  redis:
+    url: redis://my-external-redis:6379/0
+
+redis:
+  enabled: false
+```
+
+## Ingress
+
+```yaml
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: proxy-hopper.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: proxy-hopper-tls
+      hosts:
+        - proxy-hopper.example.com
+```
+
+## Upgrading
+
+```bash
+helm upgrade proxy-hopper oci://ghcr.io/cams-data/helm/proxy-hopper \
+  --namespace proxy-hopper \
+  --reuse-values \
+  --version <new-version>
+```
+
+## Uninstall
+
+```bash
+helm uninstall proxy-hopper --namespace proxy-hopper
+```

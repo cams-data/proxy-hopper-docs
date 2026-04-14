@@ -1,0 +1,150 @@
+---
+title: "SSO Authentication"
+description: "Configure OpenID Connect (OIDC) for single sign-on with your identity provider."
+---
+
+## Overview
+
+Proxy Hopper supports OIDC (OpenID Connect) for SSO integration with enterprise identity providers including Authentik, Azure AD, Keycloak, Okta, and any other OIDC-compliant IdP.
+
+With OIDC, users authenticate directly with your identity provider and present the resulting JWT to Proxy Hopper. Proxy Hopper validates the token and reads a role claim to determine access.
+
+## Configuration
+
+```yaml
+auth:
+  enabled: true
+  jwtSecret: "change-me-to-a-long-random-string"   # for locally-issued tokens if also using local admin
+
+  oidc:
+    issuerUrl: "https://auth.example.com/application/o/proxy-hopper/"
+    clientId: "proxy-hopper"
+    clientSecret: "my-client-secret"
+    roleClaimPath: "proxy_hopper_role"   # claim name in the JWT that holds the role
+    audience: "proxy-hopper"             # optional — validate the 'aud' claim
+
+  roles:
+    data-team:
+      targets: ["analytics", "general"]
+    maps-team:
+      targets: ["maps", "geocoding"]
+```
+
+### Fields
+
+| Field | Type | Description |
+|---|---|---|
+| `oidc.issuerUrl` | string | OIDC discovery URL — `/.well-known/openid-configuration` is appended automatically |
+| `oidc.clientId` | string | Client ID registered with your IdP |
+| `oidc.clientSecret` | string | Client secret (for token introspection, if used) |
+| `oidc.roleClaimPath` | string | JWT claim that contains the user's role name |
+| `oidc.audience` | string | Expected `aud` claim value — recommended for security |
+
+## How it works
+
+1. User authenticates with the identity provider using the client credentials or authorization code flow
+2. IdP issues a JWT containing the role claim
+3. User sends the JWT in `X-Proxy-Hopper-Auth: Bearer <token>`
+4. Proxy Hopper validates the token signature against the IdP's JWKS endpoint (fetched from the discovery URL)
+5. Proxy Hopper reads the role from `roleClaimPath` and checks access to the requested target
+
+## Role claim
+
+The JWT must contain a claim matching `roleClaimPath`. The claim value must be one of:
+
+- A built-in role name: `admin`, `operator`, `viewer`
+- A custom role name defined in `auth.roles`
+
+```json
+{
+  "sub": "user@example.com",
+  "proxy_hopper_role": "data-team",
+  "exp": 1700000000
+}
+```
+
+If the role claim is missing or names an unknown role, the request is rejected with `403`.
+
+## Client credentials flow
+
+For service-to-service access via OIDC (machine-to-machine):
+
+<CodeGroup>
+
+```bash curl
+# Exchange client credentials for a token
+TOKEN=$(curl -s -X POST "https://auth.example.com/application/o/token/" \
+  -d "grant_type=client_credentials" \
+  -d "client_id=my-service" \
+  -d "client_secret=my-secret" \
+  -d "scope=openid" \
+  | jq -r '.access_token')
+
+# Use the token
+curl -H "X-Proxy-Hopper-Target: https://api.example.com" \
+     -H "X-Proxy-Hopper-Auth: Bearer $TOKEN" \
+     http://proxy-hopper:8080/v1/endpoint
+```
+
+```python httpx
+import httpx
+
+# Fetch token from IdP
+auth_resp = httpx.post(
+    "https://auth.example.com/application/o/token/",
+    data={
+        "grant_type": "client_credentials",
+        "client_id": "my-service",
+        "client_secret": "my-secret",
+        "scope": "openid",
+    },
+)
+token = auth_resp.json()["access_token"]
+
+# Use token with Proxy Hopper
+client = httpx.Client(
+    base_url="http://proxy-hopper:8080",
+    headers={
+        "X-Proxy-Hopper-Target": "https://api.example.com",
+        "X-Proxy-Hopper-Auth": f"Bearer {token}",
+    },
+)
+resp = client.get("/v1/endpoint")
+```
+
+</CodeGroup>
+
+## Combining SSO with local admin
+
+You can use OIDC for service access while keeping a local `admin` account for emergency access:
+
+```yaml
+auth:
+  enabled: true
+  jwtSecret: "change-me-to-a-long-random-string"
+
+  admin:
+    username: admin
+    passwordHash: "$2b$12$..."   # fallback local account
+
+  oidc:
+    issuerUrl: "https://auth.example.com/application/o/proxy-hopper/"
+    clientId: "proxy-hopper"
+    clientSecret: "my-client-secret"
+    roleClaimPath: "proxy_hopper_role"
+```
+
+Local admin login continues to work via `/auth/login` on the admin port, independently of OIDC.
+
+## Provider-specific setup
+
+Step-by-step guides for popular identity providers:
+
+<CardGroup cols={2}>
+  <Card title="Authentik" icon="shield" href="/admin/authentication/sso-guides/authentik">
+    Set up a service account, configure a property mapping, and issue client credentials.
+  </Card>
+  <Card title="Azure Active Directory" icon="microsoft" href="/admin/authentication/sso-guides/azure">
+    Register an app, configure roles claim, and use client credentials flow.
+  </Card>
+</CardGroup>

@@ -60,3 +60,12 @@ server:
 ```
 
 If omitted, logs are written to stderr.
+
+## Recommended settings by environment
+
+| Environment | Level | Format |
+|---|---|---|
+| Local development | `DEBUG` | `text` |
+| Docker (single host) | `INFO` | `json` |
+| Kubernetes | `INFO` | `json` |
+| Debugging production | `DEBUG` | `json` |

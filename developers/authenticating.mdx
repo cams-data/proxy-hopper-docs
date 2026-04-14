@@ -1,0 +1,216 @@
+---
+title: "Authenticating"
+description: "How to authenticate your application's requests to Proxy Hopper."
+---
+
+## When is authentication required?
+
+Authentication is optional and disabled by default. Your administrator will tell you if it's enabled. When it is, every proxy request must include a valid token in the `X-Proxy-Hopper-Auth` header.
+
+Ask your administrator for:
+- An API key, or
+- Credentials to log in and obtain a JWT, or
+- Instructions for your organisation's SSO (OIDC) setup
+
+## Sending the auth header
+
+All token types use the same header:
+
+```
+X-Proxy-Hopper-Auth: Bearer <your-token>
+```
+
+This header is stripped before the request reaches the upstream API — the API you're calling never sees it.
+
+## API key authentication
+
+The simplest option for automated services. Your administrator generates a key and gives it to you.
+
+<CodeGroup>
+
+```python requests
+import requests
+
+session = requests.Session()
+session.headers.update({
+    "X-Proxy-Hopper-Target": "https://api.example.com",
+    "X-Proxy-Hopper-Auth": "Bearer ph_your_api_key_here",
+})
+
+resp = session.get("http://proxy-hopper:8080/v1/data")
+```
+
+```python httpx
+import httpx
+
+client = httpx.Client(
+    base_url="http://proxy-hopper:8080",
+    headers={
+        "X-Proxy-Hopper-Target": "https://api.example.com",
+        "X-Proxy-Hopper-Auth": "Bearer ph_your_api_key_here",
+    },
+)
+resp = client.get("/v1/data")
+```
+
+```python aiohttp
+import aiohttp
+
+async with aiohttp.ClientSession(headers={
+    "X-Proxy-Hopper-Target": "https://api.example.com",
+    "X-Proxy-Hopper-Auth": "Bearer ph_your_api_key_here",
+}) as session:
+    async with session.get("http://proxy-hopper:8080/v1/data") as resp:
+        data = await resp.json()
+```
+
+```bash curl
+curl -H "X-Proxy-Hopper-Target: https://api.example.com" \
+     -H "X-Proxy-Hopper-Auth: Bearer ph_your_api_key_here" \
+     http://proxy-hopper:8080/v1/data
+```
+
+</CodeGroup>
+
+Store your API key in an environment variable or secret manager — never hard-code it:
+
+```python
+import os
+import requests
+
+session = requests.Session()
+session.headers.update({
+    "X-Proxy-Hopper-Target": "https://api.example.com",
+    "X-Proxy-Hopper-Auth": f"Bearer {os.environ['PROXY_HOPPER_API_KEY']}",
+})
+```
+
+## JWT authentication (login first)
+
+If you have a Proxy Hopper username and password, log in to the admin API to get a short-lived JWT:
+
+<CodeGroup>
+
+```python httpx
+import httpx
+import os
+
+# Log in to get a JWT
+auth_resp = httpx.post(
+    "http://proxy-hopper:8081/auth/login",   # admin port
+    json={
+        "username": os.environ["PROXY_HOPPER_USER"],
+        "password": os.environ["PROXY_HOPPER_PASSWORD"],
+    },
+)
+auth_resp.raise_for_status()
+token = auth_resp.json()["token"]
+expires_in = auth_resp.json()["expires_in"]   # seconds
+
+# Use JWT for proxy requests
+client = httpx.Client(
+    base_url="http://proxy-hopper:8080",
+    headers={
+        "X-Proxy-Hopper-Target": "https://api.example.com",
+        "X-Proxy-Hopper-Auth": f"Bearer {token}",
+    },
+)
+resp = client.get("/v1/data")
+```
+
+```python requests
+import requests, os
+
+# Log in
+auth_resp = requests.post(
+    "http://proxy-hopper:8081/auth/login",
+    json={
+        "username": os.environ["PROXY_HOPPER_USER"],
+        "password": os.environ["PROXY_HOPPER_PASSWORD"],
+    },
+)
+token = auth_resp.json()["token"]
+
+# Use JWT
+session = requests.Session()
+session.headers.update({
+    "X-Proxy-Hopper-Target": "https://api.example.com",
+    "X-Proxy-Hopper-Auth": f"Bearer {token}",
+})
+resp = session.get("http://proxy-hopper:8080/v1/data")
+```
+
+</CodeGroup>
+
+JWTs expire (default 60 minutes). For long-running processes, you'll need to refresh the token periodically. A simple approach:
+
+```python
+import time
+import httpx
+
+class ProxyHopperClient:
+    def __init__(self, proxy_url, admin_url, username, password, target):
+        self._proxy_url = proxy_url
+        self._admin_url = admin_url
+        self._credentials = {"username": username, "password": password}
+        self._target = target
+        self._token = None
+        self._token_expiry = 0
+
+    def _refresh_if_needed(self):
+        if time.time() >= self._token_expiry - 60:   # refresh 60s before expiry
+            resp = httpx.post(f"{self._admin_url}/auth/login", json=self._credentials)
+            resp.raise_for_status()
+            data = resp.json()
+            self._token = data["token"]
+            self._token_expiry = time.time() + data["expires_in"]
+
+    def get(self, path, **kwargs):
+        self._refresh_if_needed()
+        return httpx.get(
+            f"{self._proxy_url}{path}",
+            headers={
+                "X-Proxy-Hopper-Target": self._target,
+                "X-Proxy-Hopper-Auth": f"Bearer {self._token}",
+            },
+            **kwargs,
+        )
+```
+
+## OIDC / SSO authentication
+
+If your organisation uses SSO (Azure AD, Authentik, Keycloak, etc.), you exchange your identity provider credentials for a token, then use that token with Proxy Hopper:
+
+```python
+import httpx, os
+
+# 1. Fetch a token from your IdP (client credentials flow)
+idp_resp = httpx.post(
+    os.environ["IDP_TOKEN_URL"],
+    data={
+        "grant_type": "client_credentials",
+        "client_id": os.environ["IDP_CLIENT_ID"],
+        "client_secret": os.environ["IDP_CLIENT_SECRET"],
+        "scope": "openid",
+    },
+)
+token = idp_resp.json()["access_token"]
+
+# 2. Use the token with Proxy Hopper
+client = httpx.Client(
+    base_url="http://proxy-hopper:8080",
+    headers={
+        "X-Proxy-Hopper-Target": "https://api.example.com",
+        "X-Proxy-Hopper-Auth": f"Bearer {token}",
+    },
+)
+resp = client.get("/v1/data")
+```
+
+## Error responses
+
+| Status | Meaning | Fix |
+|---|---|---|
+| `401 Authentication required` | `X-Proxy-Hopper-Auth` header is missing | Add the header |
+| `401 Invalid or expired token` | Token not recognised or JWT has expired | Check the key value; re-login for a fresh JWT |
+| `403` | Token is valid but target access not permitted | Ask your administrator to expand your API key's `targets` list or assign a different role |

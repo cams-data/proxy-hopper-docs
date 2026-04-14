@@ -1,0 +1,60 @@
+---
+title: "Environment Variables"
+description: "All PROXY_HOPPER_* environment variables and what they do."
+---
+
+All server settings can be configured via environment variables. Environment variables are overridden by the `server:` block in `config.yaml`, which is in turn overridden by CLI flags.
+
+See [Config Reference](/admin/configuration/reference#config-priority) for the full priority order.
+
+## Variable reference
+
+| Variable | Default | Description |
+|---|---|---|
+| `PROXY_HOPPER_HOST` | `0.0.0.0` | Bind address for the proxy server |
+| `PROXY_HOPPER_PORT` | `8080` | Proxy server listen port |
+| `PROXY_HOPPER_ADMIN_PORT` | `8081` | Admin API listen port (when admin is enabled) |
+| `PROXY_HOPPER_LOG_LEVEL` | `INFO` | Log verbosity — `TRACE`, `DEBUG`, `INFO`, `WARNING`, or `ERROR` |
+| `PROXY_HOPPER_LOG_FORMAT` | `text` | Log format — `text` or `json`. Use `json` for Docker/Kubernetes |
+| `PROXY_HOPPER_LOG_FILE` | stderr | Write logs to this file path instead of stderr |
+| `PROXY_HOPPER_BACKEND` | `memory` | IP pool backend — `memory` or `redis` |
+| `PROXY_HOPPER_REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL (used when `BACKEND=redis`) |
+| `PROXY_HOPPER_METRICS` | `false` | Set to `true` to enable the Prometheus `/metrics` endpoint |
+| `PROXY_HOPPER_METRICS_PORT` | `9090` | Port for the metrics server |
+| `PROXY_HOPPER_PROBE` | `true` | Set to `false` to disable the background IP health prober |
+| `PROXY_HOPPER_PROBE_INTERVAL` | `60` | Seconds between background probe rounds |
+| `PROXY_HOPPER_PROBE_TIMEOUT` | `10` | Per-IP probe HTTP timeout in seconds |
+| `PROXY_HOPPER_PROBE_URLS` | `https://1.1.1.1,https://www.google.com` | Comma-separated list of URLs to probe through each IP |
+
+## Docker Compose example
+
+```yaml
+services:
+  proxy-hopper:
+    image: ghcr.io/cams-data/proxy-hopper:latest-redis
+    environment:
+      PROXY_HOPPER_BACKEND: redis
+      PROXY_HOPPER_REDIS_URL: redis://redis:6379/0
+      PROXY_HOPPER_LOG_FORMAT: json
+      PROXY_HOPPER_LOG_LEVEL: INFO
+      PROXY_HOPPER_METRICS: "true"
+      PROXY_HOPPER_METRICS_PORT: "9090"
+```
+
+## Kubernetes example
+
+```yaml
+env:
+  - name: PROXY_HOPPER_BACKEND
+    value: redis
+  - name: PROXY_HOPPER_REDIS_URL
+    value: redis://redis:6379/0
+  - name: PROXY_HOPPER_LOG_FORMAT
+    value: json
+  - name: PROXY_HOPPER_METRICS
+    value: "true"
+```
+
+<Note>
+  Proxy Hopper ignores the Kubernetes-injected `PROXY_HOPPER_PORT` service-link variable by default (controlled via the `enableServiceLinks: false` Helm value). This prevents the injected variable from overriding the `server.port` field in your config.
+</Note>

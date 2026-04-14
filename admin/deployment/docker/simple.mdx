@@ -1,0 +1,105 @@
+---
+title: "Simple Docker Deployment"
+description: "Run Proxy Hopper as a single container with the in-memory backend."
+---
+
+The simplest way to run Proxy Hopper is a single Docker container using the in-memory backend. No external dependencies — pool state lives in process memory.
+
+**Best for:** development, testing, and single-host production deployments where restart state loss is acceptable.
+
+## Docker images
+
+Pre-built multi-arch images (`linux/amd64`, `linux/arm64`) are published to the GitHub Container Registry on every release:
+
+| Image | Backend | Use case |
+|---|---|---|
+| `ghcr.io/cams-data/proxy-hopper:latest` | Memory | Single instance |
+| `ghcr.io/cams-data/proxy-hopper:latest-redis` | Redis | Multi-instance HA |
+
+```bash
+docker pull ghcr.io/cams-data/proxy-hopper:latest
+```
+
+## Write a config file
+
+```yaml
+# config.yaml
+proxyProviders:
+  - name: my-provider
+    auth:
+      type: basic
+      username: user
+      password: secret
+    ipList:
+      - "10.0.0.1:3128"
+      - "10.0.0.2:3128"
+      - "10.0.0.3:3128"
+    regionTag: US-East
+
+ipPools:
+  - name: my-pool
+    ipRequests:
+      - provider: my-provider
+        count: 3
+
+targets:
+  - name: general
+    regex: '.*'
+    ipPool: my-pool
+    minRequestInterval: 1s
+    maxQueueWait: 30s
+    numRetries: 3
+    ipFailuresUntilQuarantine: 5
+    quarantineTime: 2m
+```
+
+## Run
+
+```bash
+docker run -d \
+  --name proxy-hopper \
+  -p 8080:8080 \
+  -v $(pwd)/config.yaml:/etc/proxy-hopper/config.yaml:ro \
+  ghcr.io/cams-data/proxy-hopper:latest
+```
+
+## Validate your config
+
+Before starting, you can validate the config file without running the server:
+
+```bash
+docker run --rm \
+  -v $(pwd)/config.yaml:/etc/proxy-hopper/config.yaml:ro \
+  ghcr.io/cams-data/proxy-hopper:latest \
+  proxy-hopper validate --config /etc/proxy-hopper/config.yaml
+# Config OK — 1 target(s) defined.
+#   'general': 3 IP(s), regex='.*'
+# Server defaults: host=0.0.0.0, port=8080, backend=memory
+```
+
+## Send a test request
+
+```bash
+curl -H "X-Proxy-Hopper-Target: https://httpbin.org" \
+     http://localhost:8080/get
+```
+
+## Override settings with environment variables
+
+```bash
+docker run -d \
+  -p 8080:8080 \
+  -v $(pwd)/config.yaml:/etc/proxy-hopper/config.yaml:ro \
+  -e PROXY_HOPPER_LOG_FORMAT=json \
+  -e PROXY_HOPPER_LOG_LEVEL=DEBUG \
+  ghcr.io/cams-data/proxy-hopper:latest
+```
+
+See [Environment Variables](/admin/configuration/environment-variables) for the full list.
+
+## Limitations of the memory backend
+
+- **State is lost on restart** — quarantined IPs, cooldown timers, and queue state reset when the container restarts
+- **Single instance only** — if you run more than one container, each has its own independent pool state
+
+For persistent state or multi-replica setups, see [Advanced Docker Deployment](/admin/deployment/docker/advanced).

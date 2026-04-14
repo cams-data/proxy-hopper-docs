@@ -1,0 +1,267 @@
+---
+title: "Config Reference"
+description: "Complete reference for all Proxy Hopper configuration fields."
+---
+
+## Config priority
+
+Settings are resolved in this order (highest wins):
+
+| Priority | Source |
+|---|---|
+| 1 | CLI flags (`--port`, `--log-level`, etc.) |
+| 2 | `server:` block in the YAML config file |
+| 3 | `PROXY_HOPPER_*` environment variables |
+| 4 | Built-in defaults |
+
+## File structure
+
+```yaml
+proxyProviders:   # optional — named proxy suppliers with credentials and region tags
+  - ...
+
+ipPools:          # optional — named pools that draw IPs from providers
+  - ...
+
+targets:          # required — URL-matching routing rules
+  - ...
+
+auth:             # optional — authentication for proxy access
+  ...
+
+server:           # optional — all fields have defaults
+  ...
+```
+
+## Duration values
+
+All duration fields accept a suffix (`1s`, `5m`, `2h`) or a bare integer (seconds):
+
+```yaml
+minRequestInterval: 1s    # one second
+maxQueueWait: 30s         # thirty seconds
+quarantineTime: 2m        # two minutes
+```
+
+---
+
+## proxyProviders
+
+Named groups of external proxy IPs with shared authentication and an optional region tag.
+Defining providers is optional — targets can also list IPs inline via `ipList`.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | required | Unique identifier referenced from `ipPools.ipRequests` |
+| `auth` | block | — | Omit for open or IP-whitelisted proxies |
+| `auth.type` | string | `basic` | Auth type — currently `basic` |
+| `auth.username` | string | required if auth set | Username for HTTP Basic auth |
+| `auth.password` | string | `""` | Password for HTTP Basic auth |
+| `ipList` | list | required | Proxy addresses — `host:port` or bare host |
+| `regionTag` | string | — | Region label attached to Prometheus metrics |
+
+```yaml
+proxyProviders:
+  - name: provider-us
+    auth:
+      type: basic
+      username: user
+      password: secret
+    ipList:
+      - "10.0.0.1:3128"
+      - "10.0.0.2:3128"
+    regionTag: US-East
+
+  - name: provider-open           # no auth — IP whitelisted
+    ipList:
+      - "10.1.0.1:3128"
+    regionTag: EU-West
+```
+
+---
+
+## ipPools
+
+Named collections of proxy IPs referenced by targets. Pools decouple the IP list from the target config — multiple targets can reference the same pool definition while maintaining independent rotation state.
+
+Defining pools is optional — targets can also list IPs inline.
+
+```yaml
+ipPools:
+  - name: pool-name
+    ipRequests:              # draw IPs from providers (randomly sampled at startup)
+      - provider: name
+        count: 5
+    ipList:                  # or list IPs inline (can be combined with ipRequests)
+      - "host:port"
+```
+
+### ipRequests fields
+
+| Field | Type | Description |
+|---|---|---|
+| `provider` | string | Name of a `proxyProviders` entry |
+| `count` | int | Number of IPs to randomly sample from that provider's list |
+
+```yaml
+ipPools:
+  - name: global-pool
+    ipRequests:
+      - provider: provider-us
+        count: 5
+      - provider: provider-au
+        count: 5
+```
+
+<Note>
+  Inline IPs in `ipPools.ipList` have no provider metadata — they won't appear with `provider` or `region` labels in Prometheus metrics.
+</Note>
+
+---
+
+## targets
+
+The core routing config. Each inbound request is matched against the target list top-to-bottom — the first regex match handles the request. At least one target is required.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | required | Label used in logs and metrics |
+| `regex` | string | required | Python regex matched against the full destination URL |
+| `ipPool` | string | required* | Name of a shared `ipPools` entry |
+| `ipList` | list | required* | Inline proxy addresses — `host:port` or bare host |
+| `defaultProxyPort` | int | `8080` | Port applied to bare IPs in `ipList` |
+| `minRequestInterval` | duration | `1s` | How long an IP is held off the pool after any request |
+| `maxQueueWait` | duration | `30s` | How long a request waits for a free IP before failing with 503 |
+| `numRetries` | int | `3` | Retry attempts on failure, each using a different IP |
+| `ipFailuresUntilQuarantine` | int | `5` | Consecutive failures before an IP is quarantined |
+| `quarantineTime` | duration | `120s` | How long a quarantined IP sits out before returning |
+
+\* Exactly one of `ipPool` or `ipList` must be provided per target.
+
+```yaml
+targets:
+  - name: google-apis
+    regex: '\.googleapis\.com'
+    ipPool: us-pool
+    minRequestInterval: 5s
+    maxQueueWait: 30s
+    numRetries: 3
+    ipFailuresUntilQuarantine: 5
+    quarantineTime: 10m
+
+  - name: general
+    regex: '.*'
+    ipPool: us-pool
+    minRequestInterval: 1s
+    maxQueueWait: 30s
+    numRetries: 3
+    ipFailuresUntilQuarantine: 5
+    quarantineTime: 2m
+```
+
+---
+
+## auth
+
+Authentication is **disabled by default**. When enabled, every proxy request must include an `X-Proxy-Hopper-Auth: Bearer <token>` header.
+
+See the [Authentication](/admin/authentication/overview) section for full configuration guides.
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `enabled` | bool | `false` | Enable authentication |
+| `jwtSecret` | string | auto-generated | Secret for signing/verifying locally-issued JWTs. Set explicitly so tokens survive restarts. |
+| `jwtExpiryMinutes` | int | `60` | JWT lifetime in minutes |
+| `apiKeys` | list | — | Service-to-service API keys |
+| `apiKeys[].name` | string | required | Identifier used in logs and error messages |
+| `apiKeys[].key` | string | required | The secret key string |
+| `apiKeys[].targets` | list | `["*"]` | Target names this key can access. `["*"]` = all targets. |
+| `admin` | block | — | Local admin user for the admin API |
+| `admin.username` | string | required if set | Admin username |
+| `admin.passwordHash` | string | required if set | Bcrypt hash — generate with `proxy-hopper hash-password` |
+| `roles` | map | — | Custom roles for JWT/OIDC users (see [User-based auth](/admin/authentication/user-based)) |
+| `oidc` | block | — | OIDC/SSO configuration (see [SSO](/admin/authentication/sso)) |
+
+```yaml
+auth:
+  enabled: true
+  jwtSecret: "change-me-to-a-long-random-string"
+  jwtExpiryMinutes: 60
+
+  apiKeys:
+    - name: my-service
+      key: "ph_changeme"
+      targets: ["*"]          # allow all targets
+
+    - name: reporting-service
+      key: "ph_reporting_key"
+      targets: ["analytics"]  # restrict to one target
+
+  admin:
+    username: admin
+    passwordHash: "$2b$12$..."  # proxy-hopper hash-password <password>
+```
+
+---
+
+## server
+
+All server fields can be set in three places — see [Config priority](#config-priority). See [Environment Variables](/admin/configuration/environment-variables) for the full env var reference.
+
+| Field (YAML) | Env var | Default | Description |
+|---|---|---|---|
+| `host` | `PROXY_HOPPER_HOST` | `0.0.0.0` | Bind address |
+| `port` | `PROXY_HOPPER_PORT` | `8080` | Proxy server port |
+| `adminPort` | `PROXY_HOPPER_ADMIN_PORT` | `8081` | Admin API port (when admin is enabled) |
+| `logLevel` | `PROXY_HOPPER_LOG_LEVEL` | `INFO` | `TRACE` \| `DEBUG` \| `INFO` \| `WARNING` \| `ERROR` |
+| `logFormat` | `PROXY_HOPPER_LOG_FORMAT` | `text` | `text` \| `json` |
+| `logFile` | `PROXY_HOPPER_LOG_FILE` | stderr | Path to log file |
+| `backend` | `PROXY_HOPPER_BACKEND` | `memory` | `memory` \| `redis` |
+| `redisUrl` | `PROXY_HOPPER_REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL |
+| `metrics` | `PROXY_HOPPER_METRICS` | `false` | Enable Prometheus `/metrics` endpoint |
+| `metricsPort` | `PROXY_HOPPER_METRICS_PORT` | `9090` | Metrics server port |
+| `probe` | `PROXY_HOPPER_PROBE` | `true` | Enable background IP health prober |
+| `probeInterval` | `PROXY_HOPPER_PROBE_INTERVAL` | `60` | Seconds between probe rounds |
+| `probeTimeout` | `PROXY_HOPPER_PROBE_TIMEOUT` | `10` | Per-probe HTTP timeout (seconds) |
+| `probeUrls` | `PROXY_HOPPER_PROBE_URLS` | Cloudflare + Google | Endpoints probed through each IP. Comma-separated as env var. |
+
+```yaml
+server:
+  host: 0.0.0.0
+  port: 8080
+  logLevel: INFO
+  logFormat: json
+  backend: memory
+  redisUrl: redis://localhost:6379/0
+  metrics: true
+  metricsPort: 9090
+```
+
+## CLI flags
+
+CLI flags override all other sources and cover the most operationally useful overrides:
+
+```
+proxy-hopper run --config config.yaml [OPTIONS]
+
+  --config / -c PATH       Path to YAML config file  [required]
+  --host TEXT              Bind address
+  --port INT               Proxy server port
+  --log-level CHOICE       TRACE|DEBUG|INFO|WARNING|ERROR
+  --log-format CHOICE      text|json
+  --log-file PATH          Write logs to file instead of stderr
+  --metrics / --no-metrics Enable Prometheus /metrics
+  --metrics-port INT       Metrics server port
+  --backend CHOICE         memory|redis
+  --redis-url TEXT         Redis connection URL
+  --probe / --no-probe     Enable background IP health prober
+  --probe-interval FLOAT   Seconds between probe rounds
+  --probe-timeout FLOAT    Per-probe HTTP timeout
+  --probe-urls TEXT        Comma-separated probe endpoints
+
+proxy-hopper validate --config config.yaml
+  Validates the config file and prints a summary without starting the server.
+
+proxy-hopper hash-password <password>
+  Generates a bcrypt hash suitable for auth.admin.passwordHash.
+```

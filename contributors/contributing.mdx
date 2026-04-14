@@ -1,0 +1,136 @@
+---
+title: "Contributing"
+description: "How to contribute to Proxy Hopper — setting up the dev environment, writing tests, and submitting pull requests."
+---
+
+## Getting started
+
+1. Fork the repository on [GitHub](https://github.com/cams-data/proxy-hopper-v2)
+2. Clone your fork
+3. Install [uv](https://docs.astral.sh/uv/getting-started/installation/) — all Python tooling is managed through it
+
+```bash
+git clone https://github.com/<your-username>/proxy-hopper-v2.git
+cd proxy-hopper-v2
+```
+
+## Development setup
+
+The project is a monorepo with multiple Python packages under `python_modules/`. Each package has its own `pyproject.toml` managed by `uv`.
+
+```bash
+# Install the core package with all dev extras
+cd python_modules/proxy-hopper
+uv sync --all-extras
+
+# Run the server locally
+uv run proxy-hopper run --config ../../docker-test/config.yaml
+```
+
+## Running tests before submitting
+
+All three test suites must pass:
+
+```bash
+cd python_modules/proxy-hopper && uv run pytest
+cd python_modules/proxy-hopper-testserver && uv run pytest
+cd python_modules/proxy-hopper-redis && uv run pytest   # requires Redis
+```
+
+See [Running Tests](/contributors/testing) for details.
+
+## Code style
+
+- **Python** — code is formatted with [ruff](https://docs.astral.sh/ruff/). Run `uv run ruff format .` and `uv run ruff check .` before committing.
+- **Type annotations** — all public functions should have type annotations. Run `uv run mypy src/` to check.
+- **Docstrings** — module-level docstrings explain the role of the module. Function docstrings where the behaviour is non-obvious.
+
+## Where to make changes
+
+| Area | Location | Notes |
+|---|---|---|
+| Core server + handlers | `python_modules/proxy-hopper/src/proxy_hopper/` | |
+| Config models | `proxy_hopper/config.py` | Pydantic v2 — update the module docstring for any new fields |
+| Auth logic | `proxy_hopper/auth.py` | |
+| Memory backend | `proxy_hopper/backend/memory.py` | |
+| Redis backend | `python_modules/proxy-hopper-redis/` | Separate package |
+| Integration test utils | `python_modules/proxy-hopper-testserver/` | |
+| Documentation | `proxy-hopper-docs/` | Mintlify MDX |
+| Helm chart | `charts/proxy-hopper/` | |
+| Docker examples | `examples/docker-compose/` | |
+
+## Adding a new config field
+
+1. Add the field to the appropriate Pydantic model in `config.py`
+2. Update the module-level docstring in `config.py` with the new field
+3. Update [Config Reference](/admin/configuration/reference) in the docs
+4. Add a test in `tests/test_config.py`
+5. If it's a server field, add the corresponding env var to [Environment Variables](/admin/configuration/environment-variables)
+
+## Writing integration tests
+
+Use `proxy-hopper-testserver` to write end-to-end tests against the real server stack:
+
+```python
+import pytest
+import pytest_asyncio
+import aiohttp
+from proxy_hopper.backend.memory import MemoryIPPoolBackend
+from proxy_hopper.config import TargetConfig, ResolvedIP, AuthConfig, ApiKeyConfig
+from proxy_hopper.server import ProxyServer
+from proxy_hopper.target_manager import TargetManager
+from proxy_hopper_testserver import MockProxyPool, UpstreamServer
+
+@pytest_asyncio.fixture
+async def upstream():
+    async with UpstreamServer() as server:
+        yield server
+
+@pytest_asyncio.fixture
+async def proxies():
+    async with MockProxyPool(count=3) as pool:
+        yield pool
+
+async def test_request_succeeds(proxies, upstream):
+    cfg = TargetConfig(
+        name="test",
+        regex=r".*",
+        resolved_ips=[ResolvedIP(host=h, port=p) for h, p in ...],
+        min_request_interval=0,
+        num_retries=0,
+        ...
+    )
+    backend = MemoryIPPoolBackend()
+    mgr = TargetManager(cfg, backend)
+    server = ProxyServer([mgr], host="127.0.0.1", port=0)
+    await server.start()
+    port = server._server.sockets[0].getsockname()[1]
+
+    try:
+        async with aiohttp.ClientSession() as client:
+            async with client.get(
+                f"http://127.0.0.1:{port}/test",
+                headers={"X-Proxy-Hopper-Target": upstream.url},
+            ) as resp:
+                assert resp.status == 200
+    finally:
+        await server.stop()
+```
+
+## Pull request process
+
+1. Create a branch from `main`
+2. Make your changes with tests
+3. Ensure all test suites pass
+4. Update documentation if you changed behaviour or added a feature
+5. Open a PR against `main` with a clear description of what and why
+6. Address any review comments
+
+## Reporting bugs
+
+Open an issue on [GitHub](https://github.com/cams-data/proxy-hopper-v2/issues) with:
+- Proxy Hopper version (`docker inspect ghcr.io/cams-data/proxy-hopper:latest | jq '.[0].Config.Labels'`)
+- Your config (with credentials redacted)
+- Steps to reproduce
+- Expected vs actual behaviour
+- Relevant log output (use `--log-level DEBUG`)

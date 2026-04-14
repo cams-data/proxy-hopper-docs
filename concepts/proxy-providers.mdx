@@ -1,0 +1,122 @@
+---
+title: "Proxy Providers"
+description: "Proxy providers are the external services that supply the IP addresses Proxy Hopper rotates through. This page explains what to look for in a provider and how to configure one."
+---
+
+## What is a proxy provider?
+
+A **proxy provider** is a commercial service that sells access to a pool of IP addresses — residential, datacenter, or mobile — that you route your outbound HTTP traffic through. Proxy Hopper connects to these IPs when making requests on your behalf.
+
+Proxy Hopper does not supply IPs itself. You bring your own provider subscription and point Proxy Hopper at the IPs they give you.
+
+## What to look for in a provider
+
+When choosing a provider, consider:
+
+**IP type**
+- **Datacenter IPs** — cheap and fast, but easily detected and blocked by sophisticated sites
+- **Residential IPs** — real home internet connections, much harder to detect, higher cost
+- **Mobile IPs** — carrier IP addresses, highest trust level, most expensive
+
+**Geography**
+- Does the API you're scraping restrict by country? You'll need IPs in the right region
+- Many providers let you filter by country, city, or ISP
+
+**Authentication**
+- Most providers use HTTP Basic auth (username + password)
+- Some use IP whitelisting (no credentials needed, but you must register your server's IP)
+- Proxy Hopper supports both
+
+**Pricing model**
+- Per-GB — good if you make small, infrequent requests
+- Per-IP/month — good for sustained, high-volume use
+- Rotating vs static — rotating services assign a new IP on each connection; static let you reuse the same IP
+
+**Protocol**
+- Proxy Hopper connects to providers over plain HTTP proxy protocol (it handles the HTTPS itself)
+- Ensure your provider supports HTTP proxy (not SOCKS-only)
+
+## Getting IPs from a provider
+
+The process varies by provider, but typically:
+
+1. Sign up and choose a plan
+2. In the dashboard, select the region(s) you need
+3. Copy the list of proxy endpoints — usually `host:port` pairs like `us-pr.example.com:8080`
+4. Note the credentials (username and password)
+
+Some providers give you a single rotating endpoint (e.g. `proxy.example.com:8080`) that internally rotates IPs on each connection. Others give you a list of individual static IPs. Proxy Hopper works with both — use a list of individual IPs if you want Proxy Hopper to control the rotation itself.
+
+## Configuring a provider in Proxy Hopper
+
+```yaml
+proxyProviders:
+  - name: my-provider
+    auth:
+      type: basic
+      username: "my-username"
+      password: "my-password"
+    ipList:
+      - "proxy1.example.com:8080"
+      - "proxy2.example.com:8080"
+      - "proxy3.example.com:8080"
+    regionTag: US-East
+```
+
+The `regionTag` is optional but recommended — it appears as a `region` label on all Prometheus metrics, letting you query performance by region.
+
+For IP-whitelisted providers (no credentials):
+
+```yaml
+proxyProviders:
+  - name: whitelisted-provider
+    ipList:
+      - "10.0.0.1:3128"
+      - "10.0.0.2:3128"
+    regionTag: EU
+```
+
+## Multiple providers
+
+You can configure multiple providers and mix IPs from them into a single pool, or dedicate separate pools to each:
+
+```yaml
+proxyProviders:
+  - name: provider-us
+    auth:
+      type: basic
+      username: user
+      password: secret
+    ipList:
+      - "10.0.0.1:3128"
+      - "10.0.0.2:3128"
+    regionTag: US
+
+  - name: provider-au
+    auth:
+      type: basic
+      username: user
+      password: secret
+    ipList:
+      - "10.1.0.1:3128"
+      - "10.1.0.2:3128"
+    regionTag: AU
+
+ipPools:
+  - name: mixed-pool
+    ipRequests:
+      - provider: provider-us
+        count: 3
+      - provider: provider-au
+        count: 3
+```
+
+## Providers vs inline IPs
+
+Proxy providers are optional. For simple setups you can list IPs directly in a target or IP pool without a provider block. Providers become useful when:
+
+- Multiple targets or pools share the same credentials
+- You want per-region metrics via `regionTag`
+- You want to randomly sample a subset of IPs from a larger provider list (via `ipRequests.count`)
+
+See [Config Reference](/admin/configuration/reference) for the full provider field reference.

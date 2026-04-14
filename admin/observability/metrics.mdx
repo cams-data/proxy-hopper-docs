@@ -1,5 +1,5 @@
 ---
-title: "Prometheus metrics"
+title: "Prometheus Metrics"
 description: "Full reference for all Proxy Hopper Prometheus metrics."
 ---
 
@@ -68,7 +68,7 @@ Probe `reason` values: `timeout`, `proxy_unreachable`, `connection_error`, `http
 
 ### `tag` label
 
-The `tag` label on `proxy_hopper_requests_total` and `proxy_hopper_responses_total` comes from the `X-Proxy-Hopper-Tag` request header. Set it to identify which endpoints are consuming IPs or triggering quarantine events:
+Set by the `X-Proxy-Hopper-Tag` request header. Use it to identify which endpoints are consuming IPs or triggering quarantine events:
 
 ```python
 session.headers["X-Proxy-Hopper-Tag"] = "search-api"
@@ -84,7 +84,7 @@ sum by (tag, status_code) (rate(proxy_hopper_responses_total[5m]))
 
 ### `provider` and `region` labels
 
-The `provider` and `region` labels on IP-level and probe metrics come from `proxyProviders` — enabling per-provider and per-region queries:
+Come from `proxyProviders` config — enable per-provider and per-region queries:
 
 ```promql
 # Average probe latency by region
@@ -100,13 +100,4 @@ rate(proxy_hopper_requests_total{outcome="success"}[5m])
 
 ## Kubernetes scraping
 
-The Kubernetes deployment manifests include pod annotations for Prometheus auto-discovery:
-
-```yaml
-annotations:
-  prometheus.io/scrape: "true"
-  prometheus.io/port: "9090"
-  prometheus.io/path: "/metrics"
-```
-
-When running multiple replicas, each exposes its own `/metrics` endpoint.
+See [Kubernetes Monitoring](/admin/deployment/kubernetes/monitoring) for Prometheus Operator ServiceMonitor configuration and pod annotation-based scraping.

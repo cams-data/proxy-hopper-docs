@@ -1,0 +1,144 @@
+---
+title: "Getting Started as a Developer"
+description: "Everything a developer needs to start sending requests through Proxy Hopper from their application."
+---
+
+## What Proxy Hopper does for your application
+
+Proxy Hopper is a standalone service that sits between your code and the third-party APIs you call. Instead of calling an API directly, you send requests to Proxy Hopper with a header pointing to the real destination. Proxy Hopper picks a proxy IP, makes the HTTPS request, handles retries, and returns the response.
+
+Your application code changes are minimal — usually just one extra header.
+
+## Prerequisites
+
+You need a running Proxy Hopper instance. If one isn't running yet, see [Simple Docker Deployment](/admin/deployment/docker/simple) to spin one up in under five minutes.
+
+Ask your administrator for:
+- The Proxy Hopper host and port (e.g. `http://proxy-hopper.internal:8080`)
+- An API key, if authentication is enabled (see [Authenticating](/developers/authenticating))
+
+## Sending your first request
+
+Add `X-Proxy-Hopper-Target` to your request headers, set it to the scheme and host of the API you want to call, and send the request to Proxy Hopper instead.
+
+<CodeGroup>
+
+```python requests
+import requests
+
+session = requests.Session()
+session.headers["X-Proxy-Hopper-Target"] = "https://api.example.com"
+
+resp = session.get("http://proxy-hopper:8080/v1/search", params={"q": "test"})
+# → Proxy Hopper forwards to https://api.example.com/v1/search?q=test
+```
+
+```python httpx
+import httpx
+
+with httpx.Client(
+    base_url="http://proxy-hopper:8080",
+    headers={"X-Proxy-Hopper-Target": "https://api.example.com"},
+) as client:
+    resp = client.get("/v1/search", params={"q": "test"})
+```
+
+```python aiohttp
+import aiohttp
+
+async with aiohttp.ClientSession(
+    headers={"X-Proxy-Hopper-Target": "https://api.example.com"}
+) as session:
+    async with session.get(
+        "http://proxy-hopper:8080/v1/search",
+        params={"q": "test"},
+    ) as resp:
+        data = await resp.json()
+```
+
+```bash curl
+curl -H "X-Proxy-Hopper-Target: https://api.example.com" \
+     "http://proxy-hopper:8080/v1/search?q=test"
+```
+
+</CodeGroup>
+
+## How the target header works
+
+The `X-Proxy-Hopper-Target` value is the scheme and host of the destination:
+
+```
+X-Proxy-Hopper-Target: https://api.example.com
+```
+
+You can optionally include a base path. Proxy Hopper prepends it to your request path:
+
+```python
+session.headers["X-Proxy-Hopper-Target"] = "https://api.example.com/v2"
+resp = session.get("http://proxy-hopper:8080/search")
+# → forwards to https://api.example.com/v2/search
+```
+
+## Session setup — recommended pattern
+
+Set up the target (and auth, if needed) on a session once and reuse it:
+
+```python
+import requests
+
+PROXY_HOPPER = "http://proxy-hopper:8080"
+TARGET_API = "https://api.example.com"
+
+session = requests.Session()
+session.headers["X-Proxy-Hopper-Target"] = TARGET_API
+# session.headers["X-Proxy-Hopper-Auth"] = "Bearer ph_mykey"  # if auth is enabled
+
+# All requests go through Proxy Hopper
+resp = session.get(f"{PROXY_HOPPER}/v1/search", params={"q": "test"})
+resp = session.post(f"{PROXY_HOPPER}/v1/ingest", json={"data": [...]})
+```
+
+## Control headers
+
+All `X-Proxy-Hopper-*` headers are stripped before the request reaches the upstream — the API you're calling never sees them.
+
+| Header | Description |
+|---|---|
+| `X-Proxy-Hopper-Target` | **Required.** Destination scheme + host (+ optional base path) |
+| `X-Proxy-Hopper-Auth` | Bearer token — required when auth is enabled |
+| `X-Proxy-Hopper-Tag` | Optional label for Prometheus metrics |
+| `X-Proxy-Hopper-Retries` | Override retry count for this request only |
+
+## Disabling retries for non-idempotent requests
+
+Proxy Hopper retries failed requests by default. For `POST` or other non-idempotent calls where a retry would cause a duplicate action, disable retries on that request:
+
+```python
+resp = session.post(
+    f"{PROXY_HOPPER}/v1/order",
+    json={"item": "widget"},
+    headers={"X-Proxy-Hopper-Retries": "0"},
+)
+```
+
+## Tagging requests for visibility
+
+If your team uses Prometheus metrics, tagging requests helps identify which endpoints are hitting rate limits:
+
+```python
+resp = session.get(
+    f"{PROXY_HOPPER}/v1/search",
+    headers={"X-Proxy-Hopper-Tag": "product-search"},
+)
+```
+
+## Next steps
+
+<CardGroup cols={2}>
+  <Card title="Sending Requests" icon="paper-plane" href="/concepts/sending-requests">
+    Full reference for all control headers and request behaviour.
+  </Card>
+  <Card title="Authenticating" icon="key" href="/developers/authenticating">
+    Add authentication headers when Proxy Hopper requires a token.
+  </Card>
+</CardGroup>

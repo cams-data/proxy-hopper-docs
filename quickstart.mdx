@@ -1,24 +1,22 @@
 ---
-title: "Quick start"
+title: "Quick Start"
 description: "Install Proxy Hopper, write a config file, and send your first proxied request."
 ---
 
 ## Run with Docker
 
-The quickest way to run Proxy Hopper is with the pre-built Docker image:
-
 ```bash
 docker pull ghcr.io/cams-data/proxy-hopper:latest
 ```
 
-For the Redis backend (multi-instance HA deployments):
+For the Redis backend (multi-instance HA):
 
 ```bash
 docker pull ghcr.io/cams-data/proxy-hopper:latest-redis
 ```
 
 <Note>
-  PyPI packages are not yet published. Docker is the recommended installation method. See [Deployment](/deployment/docker) for full Docker and Compose examples.
+  PyPI packages are not yet published. Docker is the recommended installation method. See [Simple Docker Deployment](/admin/deployment/docker/simple) for full examples.
 </Note>
 
 ## Write a config file
@@ -75,55 +73,63 @@ targets:
 ## Start the server
 
 ```bash
-docker run -v $(pwd)/config.yaml:/etc/proxy-hopper/config.yaml \
+docker run -d \
   -p 8080:8080 \
+  -v $(pwd)/config.yaml:/etc/proxy-hopper/config.yaml:ro \
   ghcr.io/cams-data/proxy-hopper:latest
 ```
 
 ## Send a request
 
+Add `X-Proxy-Hopper-Target` to your request headers with the destination URL and send it to Proxy Hopper:
+
 <CodeGroup>
 
-```bash HTTP proxy mode
-curl --proxy http://localhost:8080 https://example.com
+```bash curl
+curl -H "X-Proxy-Hopper-Target: https://httpbin.org" \
+     http://localhost:8080/get
 ```
 
-```bash Forwarding mode
-curl -H "X-Proxy-Hopper-Target: https://example.com" \
-     http://localhost:8080/api/endpoint
-```
-
-```python requests (HTTP proxy)
+```python requests
 import requests
-resp = requests.get(
-    "https://example.com",
-    proxies={"https": "http://localhost:8080"}
-)
-```
 
-```python requests (forwarding mode)
-import requests
 session = requests.Session()
-session.headers["X-Proxy-Hopper-Target"] = "https://example.com"
-resp = session.get("http://localhost:8080/api/endpoint")
+session.headers["X-Proxy-Hopper-Target"] = "https://httpbin.org"
+
+resp = session.get("http://localhost:8080/get")
+print(resp.json())
+```
+
+```python httpx
+import httpx
+
+with httpx.Client(
+    base_url="http://localhost:8080",
+    headers={"X-Proxy-Hopper-Target": "https://httpbin.org"},
+) as client:
+    resp = client.get("/get")
+    print(resp.json())
 ```
 
 ```python aiohttp
 import aiohttp
-async with aiohttp.ClientSession() as session:
-    async with session.get(
-        "https://example.com",
-        proxy="http://localhost:8080"
-    ) as resp:
-        print(resp.status)
+
+async with aiohttp.ClientSession(
+    headers={"X-Proxy-Hopper-Target": "https://httpbin.org"}
+) as session:
+    async with session.get("http://localhost:8080/get") as resp:
+        print(await resp.json())
 ```
 
 </CodeGroup>
 
 ## Validate a config file
 
+Check your config file without starting the server:
+
 ```bash
-docker run -v $(pwd)/config.yaml:/etc/proxy-hopper/config.yaml \
+docker run --rm \
+  -v $(pwd)/config.yaml:/etc/proxy-hopper/config.yaml:ro \
   ghcr.io/cams-data/proxy-hopper:latest \
   proxy-hopper validate --config /etc/proxy-hopper/config.yaml
 # Config OK — 1 target(s) defined.
@@ -134,10 +140,16 @@ docker run -v $(pwd)/config.yaml:/etc/proxy-hopper/config.yaml \
 ## Next steps
 
 <CardGroup cols={2}>
-  <Card title="Integration modes" icon="plug" href="/integration-modes">
-    Learn the differences between HTTP proxy, CONNECT tunnel, and forwarding mode.
+  <Card title="Sending Requests" icon="paper-plane" href="/concepts/sending-requests">
+    All control headers and request behaviour.
   </Card>
-  <Card title="Config reference" icon="sliders" href="/configuration/reference">
+  <Card title="Config Reference" icon="sliders" href="/admin/configuration/reference">
     Full reference for all configuration fields.
+  </Card>
+  <Card title="Docker deployment" icon="docker" href="/admin/deployment/docker/simple">
+    Production-ready Docker and Compose setups.
+  </Card>
+  <Card title="Authentication" icon="key" href="/admin/authentication/overview">
+    Secure Proxy Hopper with API keys or SSO.
   </Card>
 </CardGroup>

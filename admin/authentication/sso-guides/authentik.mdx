@@ -1,0 +1,123 @@
+---
+title: "Authentik"
+description: "Configure Authentik as an OIDC identity provider for Proxy Hopper."
+---
+
+## Overview
+
+This guide sets up Authentik to issue OIDC tokens that Proxy Hopper can validate. The approach uses a **service account** with a **client credentials** grant — suitable for machine-to-machine access.
+
+## Prerequisites
+
+- Authentik instance (self-hosted or cloud)
+- Admin access to the Authentik dashboard
+- Proxy Hopper with `auth.enabled: true`
+
+## Step 1 — Create an OAuth2 / OpenID Connect provider
+
+1. In Authentik, go to **Applications → Providers → Create**
+2. Select **OAuth2/OpenID Connect Provider**
+3. Configure:
+   - **Name**: `proxy-hopper`
+   - **Authorization flow**: select your default implicit/authorization flow
+   - **Client type**: `Confidential`
+   - **Client ID**: `proxy-hopper` (or copy the auto-generated value)
+   - **Client secret**: copy this — you will need it for Proxy Hopper config
+   - **Redirect URIs**: not needed for client credentials — leave blank or add a placeholder
+   - **Scopes**: ensure `openid` is included
+
+## Step 2 — Create an application
+
+1. Go to **Applications → Applications → Create**
+2. Configure:
+   - **Name**: `Proxy Hopper`
+   - **Slug**: `proxy-hopper`
+   - **Provider**: select the provider you created above
+
+## Step 3 — Add a role claim with a property mapping
+
+Proxy Hopper reads the role from a custom JWT claim. You need a **property mapping** to inject it.
+
+1. Go to **Customisation → Property Mappings → Create**
+2. Select **Scope Mapping**
+3. Configure:
+   - **Name**: `Proxy Hopper Role`
+   - **Scope name**: `proxy_hopper`
+   - **Expression**:
+
+```python
+# Map Authentik groups to Proxy Hopper roles.
+# Adjust group names to match your Authentik setup.
+groups = [g.name for g in request.user.ak_groups.all()]
+
+if "proxy-hopper-admins" in groups:
+    return {"proxy_hopper_role": "admin"}
+elif "data-team" in groups:
+    return {"proxy_hopper_role": "data-team"}
+elif "maps-team" in groups:
+    return {"proxy_hopper_role": "maps-team"}
+else:
+    return {"proxy_hopper_role": "viewer"}
+```
+
+4. Go back to your **OAuth2 Provider** and add this mapping under **Scopes**
+
+## Step 4 — Create a service account (for machine access)
+
+For automated/machine clients:
+
+1. Go to **Directory → Users → Create**
+2. Set **Type** to `Service Account`
+3. Note the username
+4. Create a **Token** for this user (Directory → Tokens → Create)
+5. Add the user to the appropriate group (e.g. `data-team`)
+
+For client credentials flow, you can also use the provider's own client ID and secret directly.
+
+## Step 5 — Configure Proxy Hopper
+
+```yaml
+auth:
+  enabled: true
+  jwtSecret: "change-me-to-a-long-random-string"
+
+  oidc:
+    issuerUrl: "https://auth.example.com/application/o/proxy-hopper/"
+    clientId: "proxy-hopper"
+    clientSecret: "<client-secret-from-step-1>"
+    roleClaimPath: "proxy_hopper_role"
+
+  roles:
+    data-team:
+      targets: ["analytics", "general"]
+    maps-team:
+      targets: ["maps", "geocoding"]
+```
+
+The `issuerUrl` is `https://<your-authentik-host>/application/o/<application-slug>/`.
+
+## Step 6 — Test with client credentials
+
+```bash
+TOKEN=$(curl -s -X POST \
+  "https://auth.example.com/application/o/token/" \
+  -d "grant_type=client_credentials" \
+  -d "client_id=proxy-hopper" \
+  -d "client_secret=<your-client-secret>" \
+  -d "scope=openid proxy_hopper" \
+  | jq -r '.access_token')
+
+curl -H "X-Proxy-Hopper-Target: https://api.example.com" \
+     -H "X-Proxy-Hopper-Auth: Bearer $TOKEN" \
+     http://proxy-hopper:8080/get
+```
+
+## Troubleshooting
+
+**`401 Invalid or expired token`**
+- Verify the `issuerUrl` matches the Authentik provider's issuer exactly (including trailing slash)
+- Check that the scope `proxy_hopper` is listed and the property mapping is attached to the provider
+
+**`403` on target access**
+- Verify the user is in a group that maps to a role with access to the target
+- Check the `proxy_hopper_role` claim is present in the decoded token: `echo $TOKEN | cut -d. -f2 | base64 -d | jq .`

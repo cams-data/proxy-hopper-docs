@@ -1,0 +1,117 @@
+---
+title: "Monitoring"
+description: "Prometheus metrics and Grafana dashboards for Proxy Hopper on Kubernetes."
+---
+
+## Enabling metrics
+
+Enable the Prometheus metrics endpoint in your Helm values:
+
+```yaml
+metrics:
+  enabled: true
+  port: 9090
+```
+
+This exposes `/metrics` on port `9090` of each pod.
+
+## Prometheus Operator — ServiceMonitor
+
+If you use the Prometheus Operator (e.g. via `kube-prometheus-stack`), enable the ServiceMonitor:
+
+```yaml
+metrics:
+  enabled: true
+  port: 9090
+  serviceMonitor:
+    enabled: true
+    namespace: monitoring      # namespace where Prometheus lives
+    interval: 30s
+    scrapeTimeout: 10s
+    additionalLabels:
+      release: prometheus      # must match your Prometheus Operator label selector
+```
+
+## Prometheus auto-discovery (pod annotations)
+
+If you use annotation-based scraping rather than the Prometheus Operator, the chart adds pod annotations automatically when `metrics.enabled: true`:
+
+```yaml
+annotations:
+  prometheus.io/scrape: "true"
+  prometheus.io/port: "9090"
+  prometheus.io/path: "/metrics"
+```
+
+When running multiple replicas, each pod exposes its own `/metrics` endpoint — Prometheus scrapes them independently and aggregates in queries.
+
+## Key metrics to alert on
+
+| Metric | Alert condition | Meaning |
+|---|---|---|
+| `proxy_hopper_retry_exhaustions_total` | Rising rate | Requests are failing all retries — IPs may be universally blocked |
+| `proxy_hopper_quarantined_ips` | High and rising | Many IPs are being quarantined — possible provider-wide block |
+| `proxy_hopper_queue_expired_total` | Any increase | Requests timing out in queue — pool too small for load |
+| `proxy_hopper_probe_failure_total` | Rising by region | Connectivity issues to a provider region |
+
+## Example PromQL queries
+
+```promql
+# Request success rate by target
+rate(proxy_hopper_requests_total{outcome="success"}[5m])
+  / rate(proxy_hopper_requests_total[5m])
+
+# Which endpoint is hitting rate limits most?
+sum by (tag) (rate(proxy_hopper_requests_total{outcome="rate_limited"}[5m]))
+
+# Quarantine rate by region
+rate(proxy_hopper_ip_quarantine_events_total[5m]) by (region)
+
+# Average probe latency by region
+avg by (region) (proxy_hopper_probe_duration_seconds)
+
+# Queue depth — are we starved for IPs?
+sum by (target) (proxy_hopper_queue_depth)
+
+# Current pool availability
+proxy_hopper_available_ips / (proxy_hopper_available_ips + proxy_hopper_quarantined_ips)
+```
+
+## Grafana dashboards
+
+Pre-built Grafana dashboards are available and can be auto-loaded by the Grafana sidecar:
+
+```yaml
+grafana:
+  dashboards:
+    enabled: true
+    labelKey: grafana_dashboard
+    labelValue: "1"
+    # Optional: scope to a folder
+    additionalLabels:
+      grafana_folder: proxy-hopper
+```
+
+This creates a ConfigMap with dashboard URLs that the Grafana sidecar fetches from GitHub. Requires the Grafana sidecar to be configured to watch the `proxy-hopper` namespace.
+
+## Logging in Kubernetes
+
+Use JSON log format for compatibility with Kubernetes log aggregators (Fluentd, Fluent Bit, Datadog, GCP Cloud Logging):
+
+```yaml
+config:
+  inline: |
+    server:
+      logFormat: json
+      logLevel: INFO
+```
+
+Or via environment variable:
+
+```yaml
+env:
+  - name: PROXY_HOPPER_LOG_FORMAT
+    value: json
+```
+
+See [Logging](/admin/observability/logging) for the full log level and format reference.

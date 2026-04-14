@@ -1,0 +1,156 @@
+---
+title: "Advanced Docker Deployment"
+description: "Docker Compose with Redis backend, multiple replicas, load balancing, and Prometheus metrics."
+---
+
+## Docker Compose with Redis
+
+For deployments where you need pool state to survive restarts, or where you want to run multiple replicas sharing a single IP pool.
+
+**`docker-compose.yml`**
+
+```yaml
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: >
+      redis-server
+      --save 60 1
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+  proxy-hopper:
+    image: ghcr.io/cams-data/proxy-hopper:latest-redis
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yaml:/etc/proxy-hopper/config.yaml:ro
+    environment:
+      PROXY_HOPPER_BACKEND: redis
+      PROXY_HOPPER_REDIS_URL: redis://redis:6379/0
+      PROXY_HOPPER_LOG_FORMAT: json
+    depends_on:
+      redis:
+        condition: service_healthy
+
+volumes:
+  redis-data:
+```
+
+```bash
+docker compose up -d
+```
+
+## Scaling replicas
+
+Because pool state lives in Redis, multiple replicas share it safely. Each IP is checked out to exactly one replica at a time via Redis `BLPOP` atomicity.
+
+```bash
+docker compose up -d --scale proxy-hopper=3
+```
+
+<Note>
+  When scaling, remove the host `ports:` mapping from the `proxy-hopper` service and put a load balancer in front of the replicas.
+</Note>
+
+## Load balancing with Traefik
+
+```yaml
+services:
+  traefik:
+    image: traefik:v3
+    command:
+      - "--providers.docker=true"
+      - "--entrypoints.proxy.address=:8080"
+    ports:
+      - "8080:8080"
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redis-data:/data
+
+  proxy-hopper:
+    image: ghcr.io/cams-data/proxy-hopper:latest-redis
+    restart: unless-stopped
+    # no ports: block — Traefik routes to it
+    volumes:
+      - ./config.yaml:/etc/proxy-hopper/config.yaml:ro
+    environment:
+      PROXY_HOPPER_BACKEND: redis
+      PROXY_HOPPER_REDIS_URL: redis://redis:6379/0
+      PROXY_HOPPER_LOG_FORMAT: json
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.proxy.entrypoints=proxy"
+      - "traefik.http.services.proxy.loadbalancer.server.port=8080"
+    deploy:
+      replicas: 3
+
+volumes:
+  redis-data:
+```
+
+## Enabling Prometheus metrics
+
+Add the metrics port and environment variables to the `proxy-hopper` service:
+
+```yaml
+proxy-hopper:
+  ports:
+    - "8080:8080"
+    - "9090:9090"       # expose metrics port
+  environment:
+    PROXY_HOPPER_BACKEND: redis
+    PROXY_HOPPER_REDIS_URL: redis://redis:6379/0
+    PROXY_HOPPER_LOG_FORMAT: json
+    PROXY_HOPPER_METRICS: "true"
+    PROXY_HOPPER_METRICS_PORT: "9090"
+```
+
+Metrics are available at `http://localhost:9090/metrics`.
+
+## Enabling authentication
+
+Mount a config file with `auth:` enabled. For configs containing credentials, use a Docker secret or pass the file from a secrets manager rather than committing it to source control:
+
+```yaml
+proxy-hopper:
+  image: ghcr.io/cams-data/proxy-hopper:latest-redis
+  volumes:
+    - ./config-with-auth.yaml:/etc/proxy-hopper/config.yaml:ro
+  environment:
+    PROXY_HOPPER_BACKEND: redis
+    PROXY_HOPPER_REDIS_URL: redis://redis:6379/0
+```
+
+See [API Key Authentication](/admin/authentication/api-keys) for the auth config format.
+
+## Memory backend — when Redis is overkill
+
+For single-host deployments that don't need multi-replica, you can use the simpler memory image even with Compose. Just skip Redis:
+
+```yaml
+services:
+  proxy-hopper:
+    image: ghcr.io/cams-data/proxy-hopper:latest
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./config.yaml:/etc/proxy-hopper/config.yaml:ro
+```
+
+See [Simple Docker Deployment](/admin/deployment/docker/simple) for the single-container walkthrough.

@@ -1,0 +1,100 @@
+---
+title: "Architecture"
+description: "How Proxy Hopper is structured internally — components, data flow, and design principles."
+---
+
+## Component overview
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  ProxyServer  (raw asyncio TCP)                              │
+│                                                              │
+│  _dispatch → ForwardingHandler                               │
+└──────────────────────────────┬───────────────────────────────┘
+                               │ submit(PendingRequest)
+          ┌────────────────────▼────────────────────┐
+          │    TargetManager  (one per target)       │
+          │    asyncio queue + dispatcher            │
+          │    aiohttp outbound requests + retries   │
+          └────────────────────┬────────────────────┘
+                               │ acquire / record_success / record_failure
+          ┌────────────────────▼────────────────────┐
+          │    IPPool  (one per target)              │
+          │    quarantine policy, cooldown sweeps    │
+          └────────────────────┬────────────────────┘
+                               │ push / pop / counters
+          ┌────────────────────▼────────────────────┐
+          │    IPPoolBackend                         │
+          │    Memory | Redis                        │
+          └─────────────────────────────────────────┘
+```
+
+## Key components
+
+**`ProxyServer`** — raw asyncio TCP server. Accepts connections and dispatches each to a `ForwardingHandler`. Auth checking happens here — requests are rejected before reaching the handler if the token is missing or invalid.
+
+**`ForwardingHandler`** — the single request handler. Reads the `X-Proxy-Hopper-Target` header, resolves the target (matched by regex against the destination URL), and submits the request to the appropriate `TargetManager`.
+
+**`TargetManager`** — one per target. Maintains an asyncio queue of pending requests and dispatches them using `IPPool.acquire()`. Runs the aiohttp outbound requests and handles retry logic — picks a different IP on each retry.
+
+**`IPPool`** — one per target. All quarantine and cooldown policy lives here. Never touches the backend directly — delegates storage to `IPPoolBackend`.
+
+**`IPPoolBackend`** — pure storage interface. Two implementations:
+- `MemoryBackend` — asyncio queues and Python dicts, in-process
+- `RedisBackend` — BLPOP queues and sorted sets, shared across instances
+
+**`IPProber`** — background task that periodically probes each IP through the actual proxy to verify reachability. Updates `ip_reachable` metrics and can trigger quarantine on repeated probe failures.
+
+## Design principles
+
+**Handler isolation** — `ForwardingHandler` is fully self-contained. `ProxyServer` has no request-type-specific logic.
+
+**Policy isolation** — quarantine and cooldown policy lives entirely in `IPPool`. The backend is pure storage with no policy.
+
+**Backend abstraction** — `IPPoolBackend` is a clean interface. Swapping backends requires no changes above the pool layer.
+
+**No shared mutable state between targets** — each target has its own `TargetManager` and `IPPool` instance. There is no global lock.
+
+**Auth at the boundary** — authentication and target ACL checks happen in `ProxyServer`/`ForwardingHandler` before any routing or IP acquisition. Clean separation of auth logic from proxy logic.
+
+## Source layout
+
+```
+python_modules/
+├── proxy-hopper/               # core package
+│   └── src/proxy_hopper/
+│       ├── server.py           # ProxyServer — TCP server, auth check, dispatch
+│       ├── handlers.py         # ForwardingHandler — request handling
+│       ├── target_manager.py   # TargetManager — queue + dispatch + retry
+│       ├── pool.py             # IPPool — quarantine/cooldown policy
+│       ├── backend/
+│       │   ├── base.py         # IPPoolBackend ABC
+│       │   └── memory.py       # MemoryIPPoolBackend
+│       ├── auth.py             # authenticate_token, can_access_target
+│       ├── config.py           # Config models (Pydantic)
+│       ├── metrics.py          # Prometheus metric definitions
+│       └── prober.py           # IPProber
+│
+├── proxy-hopper-redis/         # Redis backend (separate package)
+│   └── src/proxy_hopper_redis/
+│       └── backend.py          # RedisIPPoolBackend
+│
+└── proxy-hopper-testserver/    # Integration test utilities
+    └── src/proxy_hopper_testserver/
+        ├── upstream.py         # UpstreamServer (controllable HTTP server)
+        └── proxy.py            # MockProxy, MockProxyPool
+```
+
+## Request lifecycle
+
+1. Client sends `GET http://proxy-hopper:8080/path` with `X-Proxy-Hopper-Target: https://api.example.com`
+2. `ProxyServer` accepts the TCP connection and reads the request line
+3. If auth is enabled, `ForwardingHandler` validates `X-Proxy-Hopper-Auth`
+4. `ForwardingHandler` matches the destination URL against targets (top-to-bottom regex)
+5. If auth is enabled, target access is verified for the authenticated user
+6. Request is submitted to the matched `TargetManager`'s asyncio queue
+7. `TargetManager` acquires an IP from `IPPool` (waits if none available, up to `maxQueueWait`)
+8. aiohttp makes the HTTPS request to the destination via the acquired proxy IP
+9. On success: IP is returned to pool after `minRequestInterval`; response is streamed back
+10. On failure: `record_failure` is called; if `numRetries > 0`, a different IP is acquired and the request retried
+11. After `ipFailuresUntilQuarantine` consecutive failures on an IP, it is quarantined for `quarantineTime`

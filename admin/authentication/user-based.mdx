@@ -1,0 +1,138 @@
+---
+title: "User-Based Authentication"
+description: "Configure local user accounts with username and password for JWT-based access."
+---
+
+## Overview
+
+User-based auth lets you create local accounts with a username and password. Users log in via the admin API to receive a short-lived JWT, then use that JWT for subsequent proxy requests.
+
+This is suitable for:
+- Human operators who need occasional proxy access
+- Admin API access (status, management)
+- Small teams without an identity provider
+
+For automated service-to-service access, prefer [API keys](/admin/authentication/api-keys). For enterprise single sign-on, see [SSO](/admin/authentication/sso).
+
+## Configuration
+
+```yaml
+auth:
+  enabled: true
+  jwtSecret: "change-me-to-a-long-random-string"
+  jwtExpiryMinutes: 60
+
+  admin:
+    username: admin
+    passwordHash: "$2b$12$..."   # generated with proxy-hopper hash-password
+
+  roles:
+    maps-team:
+      targets: ["google-maps", "geocoding"]
+    readonly:
+      targets: []                # no proxy access — admin API read-only only
+```
+
+## Hashing passwords
+
+Generate a bcrypt password hash using the built-in CLI command:
+
+```bash
+docker run --rm ghcr.io/cams-data/proxy-hopper:latest \
+  proxy-hopper hash-password "my-secure-password"
+# $2b$12$eW9mQUJoamF1Z2ptb3VpMexamplehash...
+```
+
+Never store plain-text passwords. The `passwordHash` field expects a bcrypt hash.
+
+## Logging in
+
+POST to the admin API login endpoint with username and password:
+
+<CodeGroup>
+
+```bash curl
+curl -X POST http://proxy-hopper:8081/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"username": "admin", "password": "my-secure-password"}'
+# → {"token": "eyJhbGc...", "expires_in": 3600}
+```
+
+```python httpx
+import httpx
+
+resp = httpx.post(
+    "http://proxy-hopper:8081/auth/login",
+    json={"username": "admin", "password": "my-secure-password"},
+)
+token = resp.json()["token"]
+```
+
+</CodeGroup>
+
+The token expires after `jwtExpiryMinutes` minutes (default 60). Implement token refresh in your client or re-login before expiry.
+
+## Using the JWT for proxy requests
+
+```python
+import httpx
+
+# Log in to get a JWT
+resp = httpx.post(
+    "http://proxy-hopper:8081/auth/login",
+    json={"username": "admin", "password": "my-secure-password"},
+)
+token = resp.json()["token"]
+
+# Use the JWT for proxy requests
+with httpx.Client(
+    base_url="http://proxy-hopper:8080",
+    headers={
+        "X-Proxy-Hopper-Target": "https://api.example.com",
+        "X-Proxy-Hopper-Auth": f"Bearer {token}",
+    },
+) as client:
+    resp = client.get("/v1/endpoint")
+```
+
+## Built-in roles
+
+Three roles are built in:
+
+| Role | Proxy access | Target access | Admin API |
+|---|---|---|---|
+| `admin` | Yes | All targets | Full access |
+| `operator` | Yes | All targets | No |
+| `viewer` | No | — | Read-only |
+
+The `admin` account configured under `auth.admin` always has the `admin` role.
+
+## Custom roles
+
+Define custom roles to restrict JWT/OIDC users to specific targets:
+
+```yaml
+auth:
+  roles:
+    maps-team:
+      targets: ["google-maps", "geocoding"]
+
+    data-team:
+      targets: ["analytics", "reporting", "general"]
+
+    ops:
+      targets: ["*"]    # all targets, same as built-in operator
+```
+
+Custom roles are referenced in OIDC token claims — see [SSO](/admin/authentication/sso).
+
+## Token expiry and refresh
+
+JWTs expire after `jwtExpiryMinutes`. There is no refresh token — clients must re-login after expiry.
+
+For long-running processes, consider using API keys instead, as they don't expire.
+
+```yaml
+auth:
+  jwtExpiryMinutes: 480   # 8 hours — suitable for day-long scripts
+```

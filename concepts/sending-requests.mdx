@@ -1,0 +1,115 @@
+---
+title: "Sending Requests"
+description: "How to send requests through Proxy Hopper using the X-Proxy-Hopper-Target header."
+---
+
+## How it works
+
+Proxy Hopper accepts standard HTTP requests. To tell it where to send a request, you include the destination in the `X-Proxy-Hopper-Target` header and send the request to Proxy Hopper as if it were the target server.
+
+```
+Your app ─── X-Proxy-Hopper-Target: https://api.example.com ──► Proxy Hopper ──► external proxy IP ──► api.example.com
+              GET /v1/search HTTP/1.1
+```
+
+Proxy Hopper strips the header, reconstructs the full URL, picks an IP from the relevant target's pool, and makes the HTTPS request itself — owning the connection end-to-end. This means it can **retry** on failure by rotating to a different IP before your application ever sees the error.
+
+## Basic usage
+
+Point your HTTP client at Proxy Hopper (`http://localhost:8080` by default) and set `X-Proxy-Hopper-Target` to the scheme and host of the real destination.
+
+<CodeGroup>
+
+```bash curl
+curl -H "X-Proxy-Hopper-Target: https://api.example.com" \
+     http://localhost:8080/v1/endpoint?q=search
+```
+
+```python requests
+import requests
+
+session = requests.Session()
+session.headers["X-Proxy-Hopper-Target"] = "https://api.example.com"
+
+resp = session.get("http://localhost:8080/v1/endpoint", params={"q": "search"})
+# → forwards to https://api.example.com/v1/endpoint?q=search
+```
+
+```python httpx
+import httpx
+
+with httpx.Client(
+    base_url="http://localhost:8080",
+    headers={"X-Proxy-Hopper-Target": "https://api.example.com"},
+) as client:
+    resp = client.get("/v1/endpoint", params={"q": "search"})
+```
+
+```python aiohttp
+import aiohttp
+
+async with aiohttp.ClientSession(
+    headers={"X-Proxy-Hopper-Target": "https://api.example.com"}
+) as session:
+    async with session.get("http://localhost:8080/v1/endpoint") as resp:
+        print(resp.status)
+```
+
+</CodeGroup>
+
+The `X-Proxy-Hopper-Target` value may include a base path (`https://api.example.com/v2`) which is prepended to the request path:
+
+```python
+session.headers["X-Proxy-Hopper-Target"] = "https://api.example.com/v2"
+resp = session.get("http://localhost:8080/search")
+# → forwards to https://api.example.com/v2/search
+```
+
+## Control headers
+
+All `X-Proxy-Hopper-*` headers are stripped before the request reaches the upstream server.
+
+| Header | Description |
+|---|---|
+| `X-Proxy-Hopper-Target: https://api.example.com` | **Required.** Target scheme + host (+ optional base path). |
+| `X-Proxy-Hopper-Auth: Bearer <token>` | Required when [authentication is enabled](/admin/authentication/overview). API key or JWT. |
+| `X-Proxy-Hopper-Tag: <string>` | Optional label propagated to Prometheus metrics as the `tag` label. Useful for identifying which endpoints are hitting rate limits. |
+| `X-Proxy-Hopper-Retries: <int>` | Override the target's `numRetries` for this request only. Must be a non-negative integer; invalid values fall back to the target default. |
+
+### Tagging requests for metrics
+
+```python
+session.headers["X-Proxy-Hopper-Tag"] = "search-api"
+# → proxy_hopper_requests_total{target="...", outcome="...", tag="search-api"}
+```
+
+```promql
+# Which endpoint is hitting rate limits most?
+sum by (tag) (rate(proxy_hopper_requests_total{outcome="rate_limited"}[5m]))
+```
+
+### Overriding retries per request
+
+```python
+# Disable retries for non-idempotent calls
+session.headers["X-Proxy-Hopper-Retries"] = "0"
+
+# Increase retries for a flaky endpoint
+session.headers["X-Proxy-Hopper-Retries"] = "10"
+```
+
+## Target matching
+
+When Proxy Hopper receives a request, it matches the destination URL (from `X-Proxy-Hopper-Target` + the request path) against the `regex` patterns in your [targets config](/admin/configuration/reference#targets). The first match determines which IP pool and which policies apply.
+
+If no target matches, the request is rejected with `503 No target matched`.
+
+## Authentication
+
+When `auth.enabled: true` is set in your config, every request must include a valid token:
+
+```
+X-Proxy-Hopper-Auth: Bearer <api-key-or-jwt>
+```
+
+Missing or invalid tokens return `401`. Tokens lacking access to the matched target return `403`. See [Authentication](/admin/authentication/overview) for setup details.
