@@ -8,7 +8,7 @@ description: "How Proxy Hopper is structured internally — components, data flo
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  ProxyServer  (raw asyncio TCP)                              │
-│                                                              │
+│  hot-reload ← DynamicConfigStore change events               │
 │  _dispatch → ForwardingHandler                               │
 └──────────────────────────────┬───────────────────────────────┘
                                │ submit(PendingRequest)
@@ -24,10 +24,15 @@ description: "How Proxy Hopper is structured internally — components, data flo
           │    cooldown policy  │  │    fingerprint +       │
           └──────────┬──────────┘  │    cookie jar          │
                      │             └───────────────────────┘
-                     │ push / pop / counters
+                     │ domain methods (push/pop/quarantine/KV/pub-sub)
           ┌──────────▼──────────────────────────┐
-          │    IPPoolBackend                     │
-          │    Memory | Redis                    │
+          │    IPPoolStore / DynamicConfigStore  │
+          │    domain stores — own key naming    │
+          └──────────┬──────────────────────────┘
+                     │ storage primitives
+          ┌──────────▼──────────────────────────┐
+          │    Backend ABC                       │
+          │    MemoryBackend | RedisBackend       │
           └─────────────────────────────────────┘
 ```
 
@@ -41,9 +46,13 @@ description: "How Proxy Hopper is structured internally — components, data flo
 
 **`IdentityStore`** — one per target (when `identity.enabled`). Manages a `dict[str, Identity]` keyed by IP address. Creates identities on first use, rotates them on quarantine/429/request-limit, and is notified by `IPPool` before a quarantined IP returns to the pool.
 
-**`IPPool`** — one per target. All quarantine and cooldown policy lives here. Never touches the backend directly — delegates storage to `IPPoolBackend`. Fires an `on_quarantine_release` callback (to `IdentityStore`) before returning quarantined IPs to the pool.
+**`IPPool`** — one per target. All quarantine and cooldown policy lives here. Never touches the backend directly — delegates storage to `IPPoolStore`. Fires an `on_quarantine_release` callback (to `IdentityStore`) before returning quarantined IPs to the pool.
 
-**`IPPoolBackend`** — pure storage interface. Two implementations:
+**`IPPoolStore`** — domain store wrapping the `Backend`. Owns all key naming for pool, quarantine, and failure counters (`ph:{target}:pool`, `ph:{target}:quarantine`, etc.). Does not enforce business policy — that lives in `IPPool`.
+
+**`DynamicConfigStore`** — CRUD store for runtime target config. Persists configs as JSON in the backend KV and publishes change events (`add`/`update`/`remove`) over a pub/sub channel. Used by `ProxyServer` to hot-reload targets without restart.
+
+**`Backend` ABC** — pure storage interface. Two implementations:
 - `MemoryBackend` — asyncio queues and Python dicts, in-process
 - `RedisBackend` — BLPOP queues and sorted sets, shared across instances
 
@@ -59,7 +68,7 @@ description: "How Proxy Hopper is structured internally — components, data flo
 
 **Policy isolation** — quarantine and cooldown policy lives entirely in `IPPool`. The backend is pure storage with no policy.
 
-**Backend abstraction** — `IPPoolBackend` is a clean interface. Swapping backends requires no changes above the pool layer.
+**Backend abstraction** — `Backend` is a clean storage interface. Swapping backends requires no changes above the domain store layer. Domain stores (`IPPoolStore`, `DynamicConfigStore`) own key naming and calling conventions; `IPPool` and `ProxyServer` only see the domain stores.
 
 **No shared mutable state between targets** — each target has its own `TargetManager`, `IPPool`, and `IdentityStore` instance. There is no global lock.
 
@@ -77,9 +86,11 @@ python_modules/
 │       ├── handlers.py         # ForwardingHandler — request handling
 │       ├── target_manager.py   # TargetManager — queue + dispatch + retry + identity wiring
 │       ├── pool.py             # IPPool — quarantine/cooldown policy
+│       ├── pool_store.py       # IPPoolStore — pool domain store, owns key naming
+│       ├── dynamic_config.py   # DynamicConfigStore — runtime config CRUD + pub/sub
 │       ├── backend/
-│       │   ├── base.py         # IPPoolBackend ABC
-│       │   └── memory.py       # MemoryIPPoolBackend
+│       │   ├── base.py         # Backend ABC — storage primitives
+│       │   └── memory.py       # MemoryBackend
 │       ├── identity/
 │       │   ├── config.py       # IdentityConfig + WarmupConfig (embedded in TargetConfig)
 │       │   ├── fingerprint.py  # FingerprintProfile — 5 built-in browser profiles
@@ -92,7 +103,7 @@ python_modules/
 │
 ├── proxy-hopper-redis/         # Redis backend (separate package)
 │   └── src/proxy_hopper_redis/
-│       └── backend.py          # RedisIPPoolBackend
+│       └── backend.py          # RedisBackend
 │
 └── proxy-hopper-testserver/    # Integration test utilities
     └── src/proxy_hopper_testserver/

@@ -29,12 +29,13 @@ uv run proxy-hopper run --config ../../docker-test/config.yaml
 
 ## Running tests before submitting
 
-All three test suites must pass:
+All four test suites must pass:
 
 ```bash
 cd python_modules/proxy-hopper && uv run pytest
 cd python_modules/proxy-hopper-testserver && uv run pytest
-cd python_modules/proxy-hopper-redis && uv run pytest   # requires Redis
+cd python_modules/tests && uv run pytest              # cross-backend contract tests
+cd python_modules/proxy-hopper-redis && uv run pytest # requires Redis
 ```
 
 See [Running Tests](/contributors/testing) for details.
@@ -52,8 +53,10 @@ See [Running Tests](/contributors/testing) for details.
 | Core server + handlers | `python_modules/proxy-hopper/src/proxy_hopper/` | |
 | Config models | `proxy_hopper/config.py` | Pydantic v2 — update the module docstring for any new fields |
 | Auth logic | `proxy_hopper/auth.py` | |
-| Memory backend | `proxy_hopper/backend/memory.py` | |
-| Redis backend | `python_modules/proxy-hopper-redis/` | Separate package |
+| Pool domain store | `proxy_hopper/pool_store.py` | `IPPoolStore` — owns key naming for pool/quarantine/failures |
+| Dynamic config store | `proxy_hopper/dynamic_config.py` | `DynamicConfigStore` — runtime CRUD + pub/sub |
+| Memory backend | `proxy_hopper/backend/memory.py` | `MemoryBackend` — implements the `Backend` ABC in-process |
+| Redis backend | `python_modules/proxy-hopper-redis/` | `RedisBackend` — separate package |
 | Integration test utils | `python_modules/proxy-hopper-testserver/` | |
 | Documentation | `proxy-hopper-docs/` | Mintlify MDX |
 | Helm chart | `charts/proxy-hopper/` | |
@@ -75,8 +78,9 @@ Use `proxy-hopper-testserver` to write end-to-end tests against the real server 
 import pytest
 import pytest_asyncio
 import aiohttp
-from proxy_hopper.backend.memory import MemoryIPPoolBackend
-from proxy_hopper.config import TargetConfig, ResolvedIP, AuthConfig, ApiKeyConfig
+from proxy_hopper.backend.memory import MemoryBackend
+from proxy_hopper.pool_store import IPPoolStore
+from proxy_hopper.config import TargetConfig, ResolvedIP
 from proxy_hopper.server import ProxyServer
 from proxy_hopper.target_manager import TargetManager
 from proxy_hopper_testserver import MockProxyPool, UpstreamServer
@@ -100,9 +104,11 @@ async def test_request_succeeds(proxies, upstream):
         num_retries=0,
         ...
     )
-    backend = MemoryIPPoolBackend()
-    mgr = TargetManager(cfg, backend)
-    server = ProxyServer([mgr], host="127.0.0.1", port=0)
+    raw_backend = MemoryBackend()
+    await raw_backend.start()
+    pool_store = IPPoolStore(raw_backend)
+    mgr = TargetManager(cfg, pool_store)
+    server = ProxyServer([mgr], host="127.0.0.1", port=0, pool_store=pool_store)
     await server.start()
     port = server._server.sockets[0].getsockname()[1]
 
@@ -115,11 +121,12 @@ async def test_request_succeeds(proxies, upstream):
                 assert resp.status == 200
     finally:
         await server.stop()
+        await raw_backend.stop()
 ```
 
 ## Pull request process
 
-1. Create a branch from `main`
+1. Create a branch from `next`
 2. Make your changes with tests
 3. Ensure all test suites pass
 4. Update documentation if you changed behaviour or added a feature
