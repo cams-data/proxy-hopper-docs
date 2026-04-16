@@ -48,7 +48,7 @@ quarantineTime: 2m        # two minutes
 ## proxyProviders
 
 Named groups of external proxy IPs with shared authentication and an optional region tag.
-Defining providers is optional — targets can also list IPs inline via `ipList`.
+At least one provider is required — IPs are declared here and referenced by pools.
 
 | Field | Type | Default | Description |
 |---|---|---|---|
@@ -82,18 +82,14 @@ proxyProviders:
 
 ## ipPools
 
-Named collections of proxy IPs referenced by targets. Pools decouple the IP list from the target config — multiple targets can reference the same pool definition while maintaining independent rotation state.
-
-Defining pools is optional — targets can also list IPs inline.
+Named collections of proxy IPs referenced by targets. Pools decouple the IP list from the target config — multiple targets can reference the same pool while maintaining independent rotation state.
 
 ```yaml
 ipPools:
   - name: pool-name
-    ipRequests:              # draw IPs from providers (randomly sampled at startup)
+    ipRequests:              # draw IPs from providers
       - provider: name
         count: 5
-    ipList:                  # or list IPs inline (can be combined with ipRequests)
-      - "host:port"
 ```
 
 ### ipRequests fields
@@ -101,7 +97,9 @@ ipPools:
 | Field | Type | Description |
 |---|---|---|
 | `provider` | string | Name of a `proxyProviders` entry |
-| `count` | int | Number of IPs to randomly sample from that provider's list |
+| `count` | int | Number of IPs to take from that provider's list (first N; graceful if provider has fewer) |
+
+Multiple `ipRequests` entries combine IPs from different providers into one pool:
 
 ```yaml
 ipPools:
@@ -113,10 +111,6 @@ ipPools:
         count: 5
 ```
 
-<Note>
-  Inline IPs in `ipPools.ipList` have no provider metadata — they won't appear with `provider` or `region` labels in Prometheus metrics.
-</Note>
-
 ---
 
 ## targets
@@ -127,23 +121,20 @@ The core routing config. Each inbound request is matched against the target list
 |---|---|---|---|
 | `name` | string | required | Label used in logs and metrics |
 | `regex` | string | required | Python regex matched against the full destination URL |
-| `ipPool` | string | required* | Name of a shared `ipPools` entry |
-| `ipList` | list | required* | Inline proxy addresses — `host:port` or bare host |
-| `defaultProxyPort` | int | `8080` | Port applied to bare IPs in `ipList` |
+| `ipPool` | string | required | Name of a shared `ipPools` entry |
 | `minRequestInterval` | duration | `1s` | How long an IP is held off the pool after any request |
 | `maxQueueWait` | duration | `30s` | How long a request waits for a free IP before failing with 503 |
 | `numRetries` | int | `3` | Retry attempts on failure, each using a different IP |
 | `ipFailuresUntilQuarantine` | int | `5` | Consecutive failures before an IP is quarantined |
 | `quarantineTime` | duration | `120s` | How long a quarantined IP sits out before returning |
+| `mutable` | bool | `true` | Whether this target can be updated or removed via the admin API |
 | `identity` | block | — | Per-(IP, target) client identity — see [below](#identity) |
-
-\* Exactly one of `ipPool` or `ipList` must be provided per target.
 
 ```yaml
 targets:
   - name: google-apis
     regex: '\.googleapis\.com'
-    ipPool: us-pool
+    ipPool: us-pool           # must reference an ipPools entry
     minRequestInterval: 5s
     maxQueueWait: 30s
     numRetries: 3
@@ -242,7 +233,8 @@ All server fields can be set in three places — see [Config priority](#config-p
 |---|---|---|---|
 | `host` | `PROXY_HOPPER_HOST` | `0.0.0.0` | Bind address |
 | `port` | `PROXY_HOPPER_PORT` | `8080` | Proxy server port |
-| `adminPort` | `PROXY_HOPPER_ADMIN_PORT` | `8081` | Admin API port (when admin is enabled) |
+| `admin` | `PROXY_HOPPER_ADMIN` | `false` | Enable the admin server (GraphQL API + REST endpoints) |
+| `adminPort` | `PROXY_HOPPER_ADMIN_PORT` | `8081` | Admin server port |
 | `logLevel` | `PROXY_HOPPER_LOG_LEVEL` | `INFO` | `TRACE` \| `DEBUG` \| `INFO` \| `WARNING` \| `ERROR` |
 | `logFormat` | `PROXY_HOPPER_LOG_FORMAT` | `text` | `text` \| `json` |
 | `logFile` | `PROXY_HOPPER_LOG_FILE` | stderr | Path to log file |

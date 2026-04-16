@@ -52,6 +52,7 @@
             "pages": [
               "concepts/targets",
               "concepts/proxy-providers",
+              "concepts/ip-pools",
               "concepts/sending-requests",
               "concepts/identities"
             ]
@@ -104,6 +105,14 @@
                       "admin/authentication/sso-guides/azure"
                     ]
                   }
+                ]
+              },
+              {
+                "group": "Admin Server",
+                "expanded": true,
+                "pages": [
+                  "admin/admin-server/overview",
+                  "admin/admin-server/graphql"
                 ]
               },
               {

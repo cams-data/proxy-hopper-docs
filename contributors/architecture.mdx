@@ -8,7 +8,7 @@ description: "How Proxy Hopper is structured internally — components, data flo
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  ProxyServer  (raw asyncio TCP)                              │
-│  hot-reload ← DynamicConfigStore change events               │
+│  hot-reload ← ProxyRepository change events                  │
 │  _dispatch → ForwardingHandler                               │
 └──────────────────────────────┬───────────────────────────────┘
                                │ submit(PendingRequest)
@@ -26,7 +26,7 @@ description: "How Proxy Hopper is structured internally — components, data flo
                      │             └───────────────────────┘
                      │ domain methods (push/pop/quarantine/KV/pub-sub)
           ┌──────────▼──────────────────────────┐
-          │    IPPoolStore / DynamicConfigStore  │
+          │    IPPoolStore / ProxyRepository     │
           │    domain stores — own key naming    │
           └──────────┬──────────────────────────┘
                      │ storage primitives
@@ -50,7 +50,7 @@ description: "How Proxy Hopper is structured internally — components, data flo
 
 **`IPPoolStore`** — domain store wrapping the `Backend`. Owns all key naming for pool, quarantine, and failure counters (`ph:{target}:pool`, `ph:{target}:quarantine`, etc.). Does not enforce business policy — that lives in `IPPool`.
 
-**`DynamicConfigStore`** — CRUD store for runtime target config. Persists configs as JSON in the backend KV and publishes change events (`add`/`update`/`remove`) over a pub/sub channel. Used by `ProxyServer` to hot-reload targets without restart.
+**`ProxyRepository`** — CRUD store for all runtime entities: targets, IP pools, and providers. Persists objects as JSON in the backend KV and publishes change events (`add`/`update`/`remove`) over a pub/sub channel. Owns the cascade chain: a provider IP change propagates through pools to recompute target `resolved_ips` snapshots and emits `target:update` events. Used by `ProxyServer` to hot-reload without restart and by the GraphQL API for all mutations.
 
 **`Backend` ABC** — pure storage interface. Two implementations:
 - `MemoryBackend` — asyncio queues and Python dicts, in-process
@@ -68,7 +68,7 @@ description: "How Proxy Hopper is structured internally — components, data flo
 
 **Policy isolation** — quarantine and cooldown policy lives entirely in `IPPool`. The backend is pure storage with no policy.
 
-**Backend abstraction** — `Backend` is a clean storage interface. Swapping backends requires no changes above the domain store layer. Domain stores (`IPPoolStore`, `DynamicConfigStore`) own key naming and calling conventions; `IPPool` and `ProxyServer` only see the domain stores.
+**Backend abstraction** — `Backend` is a clean storage interface. Swapping backends requires no changes above the domain store layer. Domain stores (`IPPoolStore`, `ProxyRepository`) own key naming and calling conventions; `IPPool` and `ProxyServer` only see the domain stores.
 
 **No shared mutable state between targets** — each target has its own `TargetManager`, `IPPool`, and `IdentityStore` instance. There is no global lock.
 
@@ -82,22 +82,32 @@ description: "How Proxy Hopper is structured internally — components, data flo
 python_modules/
 ├── proxy-hopper/               # core package
 │   └── src/proxy_hopper/
-│       ├── server.py           # ProxyServer — TCP server, auth check, dispatch
+│       ├── server.py           # ProxyServer — TCP server, auth check, dispatch, hot-reload
 │       ├── handlers.py         # ForwardingHandler — request handling
 │       ├── target_manager.py   # TargetManager — queue + dispatch + retry + identity wiring
 │       ├── pool.py             # IPPool — quarantine/cooldown policy
 │       ├── pool_store.py       # IPPoolStore — pool domain store, owns key naming
-│       ├── dynamic_config.py   # DynamicConfigStore — runtime config CRUD + pub/sub
+│       ├── repository.py       # ProxyRepository — CRUD + pub/sub + cascade for targets/pools/providers
 │       ├── backend/
 │       │   ├── base.py         # Backend ABC — storage primitives
 │       │   └── memory.py       # MemoryBackend
+│       ├── config/
+│       │   ├── models.py       # Pydantic models — TargetConfig, IpPool, IpRequest, ProxyProvider, …
+│       │   ├── loader.py       # load_config() — YAML → ProxyHopperConfig
+│       │   └── normalization.py# camelCase → snake_case normalisation helpers
+│       ├── graphql/
+│       │   ├── queries.py      # Query type — targets, pools, providers, status
+│       │   ├── mutations.py    # Mutation type — CRUD + addIpToProvider / removeIpFromProvider
+│       │   ├── types.py        # Strawberry output types
+│       │   └── inputs.py       # Strawberry input types + converters
+│       ├── auth/
+│       │   ├── __init__.py     # authenticate_token, can_access_target, JWT helpers
+│       │   └── admin.py        # FastAPI admin app (REST + GraphQL mounted at /graphql)
 │       ├── identity/
 │       │   ├── config.py       # IdentityConfig + WarmupConfig (embedded in TargetConfig)
 │       │   ├── fingerprint.py  # FingerprintProfile — 5 built-in browser profiles
 │       │   ├── identity.py     # Identity — applies headers, manages cookies
 │       │   └── store.py        # IdentityStore — get-or-create + rotation per address
-│       ├── auth.py             # authenticate_token, can_access_target
-│       ├── config.py           # Config models (Pydantic)
 │       ├── metrics.py          # Prometheus metric definitions
 │       └── prober.py           # IPProber
 │

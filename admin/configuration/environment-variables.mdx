@@ -13,7 +13,8 @@ See [Config Reference](/admin/configuration/reference#config-priority) for the f
 |---|---|---|
 | `PROXY_HOPPER_HOST` | `0.0.0.0` | Bind address for the proxy server |
 | `PROXY_HOPPER_PORT` | `8080` | Proxy server listen port |
-| `PROXY_HOPPER_ADMIN_PORT` | `8081` | Admin API listen port (when admin is enabled) |
+| `PROXY_HOPPER_ADMIN` | `false` | Set to `true` to enable the admin server (GraphQL + REST) |
+| `PROXY_HOPPER_ADMIN_PORT` | `8081` | Admin server listen port |
 | `PROXY_HOPPER_LOG_LEVEL` | `INFO` | Log verbosity — `TRACE`, `DEBUG`, `INFO`, `WARNING`, or `ERROR` |
 | `PROXY_HOPPER_LOG_FORMAT` | `text` | Log format — `text` or `json`. Use `json` for Docker/Kubernetes |
 | `PROXY_HOPPER_LOG_FILE` | stderr | Write logs to this file path instead of stderr |

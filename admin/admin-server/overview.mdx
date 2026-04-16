@@ -1,0 +1,94 @@
+---
+title: "Admin Server"
+description: "The Proxy Hopper admin server provides a REST health endpoint, a login endpoint, and the GraphQL management API — all on a separate port from the proxy."
+---
+
+## Overview
+
+When `server.admin: true` is set, Proxy Hopper starts a second HTTP server on port `8081` (configurable). This server exposes:
+
+| Endpoint | Auth required | Description |
+|---|---|---|
+| `GET /health` | No | Liveness check — always returns `{"status": "ok"}` |
+| `POST /auth/login` | No | Exchange admin credentials for a JWT |
+| `GET /api/v1/status` | Read | Current target list and server state |
+| `GET /graphql` | Read | GraphQL playground (browser UI) |
+| `POST /graphql` | Read / Write | GraphQL API |
+
+The GraphQL API lets you query and mutate **targets**, **IP pools**, and **providers** at runtime — without restarting the server and without editing the config file.
+
+## Enabling the admin server
+
+```yaml
+server:
+  admin: true
+  adminPort: 8081        # default — omit to accept the default
+```
+
+Or via environment variable:
+
+```bash
+PROXY_HOPPER_ADMIN=true
+PROXY_HOPPER_ADMIN_PORT=8081
+```
+
+<Warning>
+  The admin server runs on `0.0.0.0` by default. In production, restrict access at the network level — bind it to an internal interface or place it behind a firewall/ingress that only your operations tooling can reach.
+</Warning>
+
+## Authentication
+
+If `auth.enabled: true` is set, every request to protected endpoints must include an `Authorization: Bearer <token>` header. The token can be:
+
+- A **JWT** obtained from `POST /auth/login` (requires `auth.admin` to be configured)
+- An **API key** declared in `auth.apiKeys`
+- An **OIDC token** (when `auth.oidc` is configured)
+
+The `/health` endpoint is always public.
+
+When auth is **disabled**, all endpoints are accessible without credentials. This is acceptable for internal-only deployments where the admin port is not exposed outside your network.
+
+## Obtaining a JWT
+
+```bash
+curl -X POST http://localhost:8081/auth/login \
+  -d "username=admin&password=mypassword"
+```
+
+Returns:
+
+```json
+{
+  "access_token": "eyJ...",
+  "token_type": "bearer"
+}
+```
+
+Pass the token in subsequent requests:
+
+```bash
+curl -H "Authorization: Bearer eyJ..." \
+     http://localhost:8081/api/v1/status
+```
+
+## GraphQL playground
+
+With the admin server running, open `http://localhost:8081/graphql` in a browser to access the interactive GraphQL playground. You can explore the schema, run queries, and test mutations directly from the browser.
+
+If auth is enabled, add your token via the playground's "Headers" panel:
+
+```json
+{
+  "Authorization": "Bearer eyJ..."
+}
+```
+
+See [GraphQL API](/admin/admin-server/graphql) for the full query and mutation reference.
+
+## Ports summary
+
+| Port | Purpose | Config key | Env var |
+|---|---|---|---|
+| `8080` | Proxy (client traffic) | `server.port` | `PROXY_HOPPER_PORT` |
+| `8081` | Admin server | `server.adminPort` | `PROXY_HOPPER_ADMIN_PORT` |
+| `9090` | Prometheus metrics | `server.metricsPort` | `PROXY_HOPPER_METRICS_PORT` |

@@ -21,24 +21,11 @@ docker pull ghcr.io/cams-data/proxy-hopper:latest-redis
 
 ## Write a config file
 
-Create a `config.yaml`. The minimal config needs at least one target:
+Create a `config.yaml`. Every config follows a three-tier model:
 
-```yaml
-targets:
-  - name: general
-    regex: '.*'
-    ipList:
-      - "10.0.0.1:3128"
-      - "10.0.0.2:3128"
-      - "10.0.0.3:3128"
-    minRequestInterval: 1s
-    maxQueueWait: 30s
-    numRetries: 3
-    ipFailuresUntilQuarantine: 5
-    quarantineTime: 2m
-```
-
-For a config with named proxy providers and shared IP pools:
+- **`proxyProviders`** — your proxy supplier's IPs and credentials
+- **`ipPools`** — named collections that draw IPs from one or more providers
+- **`targets`** — URL routing rules that reference a pool
 
 ```yaml
 proxyProviders:

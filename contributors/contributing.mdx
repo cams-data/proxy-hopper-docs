@@ -51,10 +51,12 @@ See [Running Tests](/contributors/testing) for details.
 | Area | Location | Notes |
 |---|---|---|
 | Core server + handlers | `python_modules/proxy-hopper/src/proxy_hopper/` | |
-| Config models | `proxy_hopper/config.py` | Pydantic v2 — update the module docstring for any new fields |
-| Auth logic | `proxy_hopper/auth.py` | |
+| Config models | `proxy_hopper/config/models.py` | Pydantic v2 — `TargetConfig`, `IpPool`, `IpRequest`, `ProxyProvider` |
+| Config loader | `proxy_hopper/config/loader.py` | YAML → `ProxyHopperConfig`; pool IP resolution |
+| Auth logic | `proxy_hopper/auth/` | `__init__.py` for token logic; `admin.py` for FastAPI admin app |
 | Pool domain store | `proxy_hopper/pool_store.py` | `IPPoolStore` — owns key naming for pool/quarantine/failures |
-| Dynamic config store | `proxy_hopper/dynamic_config.py` | `DynamicConfigStore` — runtime CRUD + pub/sub |
+| Repository | `proxy_hopper/repository.py` | `ProxyRepository` — runtime CRUD + pub/sub + cascade for targets/pools/providers |
+| GraphQL API | `proxy_hopper/graphql/` | Strawberry schema — queries, mutations, types, inputs |
 | Memory backend | `proxy_hopper/backend/memory.py` | `MemoryBackend` — implements the `Backend` ABC in-process |
 | Redis backend | `python_modules/proxy-hopper-redis/` | `RedisBackend` — separate package |
 | Integration test utils | `python_modules/proxy-hopper-testserver/` | |
@@ -64,8 +66,8 @@ See [Running Tests](/contributors/testing) for details.
 
 ## Adding a new config field
 
-1. Add the field to the appropriate Pydantic model in `config.py`
-2. Update the module-level docstring in `config.py` with the new field
+1. Add the field to the appropriate Pydantic model in `config/models.py`
+2. Update `config/normalization.py` if the field uses camelCase in YAML
 3. Update [Config Reference](/admin/configuration/reference) in the docs
 4. Add a test in `tests/test_config.py`
 5. If it's a server field, add the corresponding env var to [Environment Variables](/admin/configuration/environment-variables)

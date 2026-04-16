@@ -1,0 +1,90 @@
+---
+title: "IP Pools"
+description: "IP pools are named collections of proxy IPs that targets use for rotation. They draw IPs from providers and serve as the link between your provider subscriptions and your routing rules."
+---
+
+## What is an IP pool?
+
+An **IP pool** is a named set of proxy IP addresses that one or more targets draw from. Pools sit between providers (which declare the IPs) and targets (which define the routing rules and rate-limit policies).
+
+```
+ProxyProvider  ─── ipRequests ───►  IpPool  ◄─── ipPool ───  Target
+ (IPs + auth)                      (named set)              (regex + policy)
+```
+
+## Why pools exist
+
+Pools decouple IP supply from routing policy:
+
+- **Shared IP set, independent state** — multiple targets can reference the same pool definition. Each target maintains its own rotation queue and quarantine state independently, so a failure on one target does not affect the other.
+- **Flexible composition** — a single pool can draw IPs from multiple providers, mixing regions or credential sets into one rotation.
+- **Runtime mutability** — pools are first-class repository objects. You can add or remove IPs from a provider and the change propagates automatically through every pool that references it, and on to every target that references those pools.
+
+## Defining a pool
+
+```yaml
+ipPools:
+  - name: us-pool
+    ipRequests:
+      - provider: provider-us
+        count: 10
+```
+
+`count` controls how many IPs are taken from that provider's list. Selection is deterministic (the first N IPs from the provider's `ipList`) and graceful — if the provider has fewer IPs than `count`, all available IPs are used with no error.
+
+## Drawing from multiple providers
+
+```yaml
+ipPools:
+  - name: global-pool
+    ipRequests:
+      - provider: provider-us
+        count: 5
+      - provider: provider-eu
+        count: 5
+```
+
+This pool contains 10 IPs — 5 from each region. Targets that reference `global-pool` rotate across all 10.
+
+## Sharing a pool across targets
+
+```yaml
+targets:
+  - name: google-apis
+    regex: '\.googleapis\.com'
+    ipPool: global-pool
+    minRequestInterval: 5s
+
+  - name: general
+    regex: '.*'
+    ipPool: global-pool
+    minRequestInterval: 1s
+```
+
+Both targets draw from the same pool definition, but each maintains its own queue. An IP quarantined for `google-apis` is still available for `general`.
+
+## Runtime pool management
+
+Pools can be created, updated, and removed at runtime via the [GraphQL API](/admin/admin-server/graphql) without restarting the server.
+
+When you add or remove an IP from a provider via `addIpToProvider` / `removeIpFromProvider`, the change cascades automatically:
+
+1. The provider's `ipList` is updated
+2. All pools that reference that provider are recomputed
+3. All targets that reference those pools receive updated resolved IPs
+4. Live pool queues are updated — new IPs are pushed in; removed IPs drain naturally
+
+## Mutable vs immutable pools
+
+Setting `mutable: false` on a pool prevents it from being updated or removed via the admin API. This is useful for production pools you want to protect from accidental mutation:
+
+```yaml
+ipPools:
+  - name: production-pool
+    mutable: false
+    ipRequests:
+      - provider: provider-us
+        count: 20
+```
+
+Immutable pools can still be modified by editing the config file and restarting the server.

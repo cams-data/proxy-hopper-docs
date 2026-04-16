@@ -1,0 +1,376 @@
+---
+title: "GraphQL API"
+description: "Query and mutate targets, IP pools, and providers at runtime via the GraphQL management API."
+---
+
+The GraphQL API is mounted at `/graphql` on the admin server. It provides full CRUD for every runtime entity — targets, IP pools, and providers — and propagates changes live without a restart.
+
+Access the interactive playground at `GET http://localhost:8081/graphql`.
+
+## Cascade behaviour
+
+Changes to a provider's IP list cascade automatically:
+
+```
+addIpToProvider / removeIpFromProvider
+  └─► provider's ip_list updated in repository
+       └─► all pools that reference this provider recomputed
+            └─► all targets that reference those pools get new resolved_ips
+                 └─► target:update events emitted → live pool queues updated
+```
+
+This means you can add or remove an IP from a provider and every target that uses that provider's IPs through a pool will see the change immediately.
+
+---
+
+## Queries
+
+### `targets`
+
+List all targets stored in the repository.
+
+```graphql
+{
+  targets {
+    name
+    regex
+    poolName
+    mutable
+    minRequestInterval
+    maxQueueWait
+    numRetries
+    ipFailuresUntilQuarantine
+    quarantineTime
+  }
+}
+```
+
+### `target(name: String!)`
+
+Fetch a single target by name.
+
+```graphql
+{
+  target(name: "google-apis") {
+    name
+    regex
+    poolName
+  }
+}
+```
+
+### `pools`
+
+List all IP pools.
+
+```graphql
+{
+  pools {
+    name
+    mutable
+    ipRequests {
+      provider
+      count
+    }
+  }
+}
+```
+
+### `pool(name: String!)`
+
+Fetch a single pool by name.
+
+```graphql
+{
+  pool(name: "us-pool") {
+    name
+    ipRequests {
+      provider
+      count
+    }
+  }
+}
+```
+
+### `providers`
+
+List all proxy providers.
+
+```graphql
+{
+  providers {
+    name
+    ipList
+    regionTag
+    mutable
+  }
+}
+```
+
+### `provider(name: String!)`
+
+Fetch a single provider by name.
+
+```graphql
+{
+  provider(name: "provider-us") {
+    name
+    ipList
+    regionTag
+  }
+}
+```
+
+### `status`
+
+Current auth state and caller identity.
+
+```graphql
+{
+  status {
+    authEnabled
+    userSub
+    userRole
+  }
+}
+```
+
+---
+
+## Mutations
+
+All mutations require the `write` permission.
+
+### Target mutations
+
+#### `addTarget`
+
+Add a new target. The pool referenced by `poolName` must already exist in the repository.
+
+```graphql
+mutation {
+  addTarget(input: {
+    name: "new-api"
+    regex: "api\\.example\\.com"
+    poolName: "us-pool"
+    minRequestInterval: 2.0
+    maxQueueWait: 30.0
+    numRetries: 3
+    ipFailuresUntilQuarantine: 5
+    quarantineTime: 120.0
+  }) {
+    name
+    poolName
+  }
+}
+```
+
+#### `updateTarget`
+
+Update an existing mutable target. Replaces the full target definition.
+
+```graphql
+mutation {
+  updateTarget(input: {
+    name: "new-api"
+    regex: "api\\.example\\.com"
+    poolName: "eu-pool"
+    minRequestInterval: 5.0
+    maxQueueWait: 60.0
+    numRetries: 2
+    ipFailuresUntilQuarantine: 3
+    quarantineTime: 300.0
+  }) {
+    name
+    poolName
+  }
+}
+```
+
+#### `removeTarget`
+
+Remove a target from the repository.
+
+```graphql
+mutation {
+  removeTarget(name: "new-api")
+}
+```
+
+---
+
+### Pool mutations
+
+#### `addPool`
+
+Add a new IP pool.
+
+```graphql
+mutation {
+  addPool(input: {
+    name: "eu-pool"
+    ipRequests: [
+      { provider: "provider-eu", count: 5 }
+    ]
+  }) {
+    name
+    ipRequests {
+      provider
+      count
+    }
+  }
+}
+```
+
+#### `updatePool`
+
+Update an existing mutable pool. Triggers a cascade to all targets referencing this pool.
+
+```graphql
+mutation {
+  updatePool(input: {
+    name: "eu-pool"
+    ipRequests: [
+      { provider: "provider-eu", count: 10 }
+    ]
+  }) {
+    name
+  }
+}
+```
+
+#### `removePool`
+
+Remove a pool from the repository.
+
+```graphql
+mutation {
+  removePool(name: "eu-pool")
+}
+```
+
+---
+
+### Provider mutations
+
+#### `addProvider`
+
+Add a new proxy provider.
+
+```graphql
+mutation {
+  addProvider(input: {
+    name: "provider-eu"
+    ipList: ["10.2.0.1:3128", "10.2.0.2:3128"]
+    regionTag: "EU-West"
+    auth: { username: "user", password: "secret" }
+  }) {
+    name
+    ipList
+    regionTag
+  }
+}
+```
+
+#### `updateProvider`
+
+Update an existing mutable provider. Does **not** automatically cascade to pools and targets — use `addIpToProvider` / `removeIpFromProvider` for live IP changes.
+
+```graphql
+mutation {
+  updateProvider(input: {
+    name: "provider-eu"
+    ipList: ["10.2.0.1:3128", "10.2.0.2:3128", "10.2.0.3:3128"]
+    regionTag: "EU-West"
+  }) {
+    name
+    ipList
+  }
+}
+```
+
+#### `removeProvider`
+
+Remove a provider from the repository.
+
+```graphql
+mutation {
+  removeProvider(name: "provider-eu")
+}
+```
+
+#### `addIpToProvider`
+
+Append an IP to a provider's list and cascade the change through all pools and targets that reference this provider.
+
+```graphql
+mutation {
+  addIpToProvider(provider: "provider-us", address: "10.0.0.5:3128") {
+    name
+    ipList
+  }
+}
+```
+
+#### `removeIpFromProvider`
+
+Remove an IP from a provider's list and cascade the change. The IP drains naturally from live pool queues — it is not forcibly evicted mid-request.
+
+```graphql
+mutation {
+  removeIpFromProvider(provider: "provider-us", address: "10.0.0.1:3128") {
+    name
+    ipList
+  }
+}
+```
+
+---
+
+## Input types
+
+### TargetInput
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | String | required | Unique target name |
+| `regex` | String | required | Python regex matched against the full destination URL |
+| `poolName` | String | required | Name of an existing pool in the repository |
+| `minRequestInterval` | Float | `1.0` | Seconds an IP is held off the pool after each request |
+| `maxQueueWait` | Float | `30.0` | Seconds to wait for a free IP before returning 503 |
+| `numRetries` | Int | `3` | Retry attempts on failure |
+| `ipFailuresUntilQuarantine` | Int | `5` | Consecutive failures before quarantine |
+| `quarantineTime` | Float | `120.0` | Quarantine duration in seconds |
+| `mutable` | Boolean | `true` | Whether this target can be updated or removed via the API |
+
+### IpPoolInput
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | String | required | Unique pool name |
+| `ipRequests` | [IpRequestInput] | required | One or more provider IP requests |
+| `mutable` | Boolean | `true` | Whether this pool can be updated or removed via the API |
+
+### IpRequestInput
+
+| Field | Type | Description |
+|---|---|---|
+| `provider` | String | Name of an existing provider |
+| `count` | Int | Number of IPs to draw from the provider (takes first N; graceful if provider has fewer) |
+
+### ProviderInput
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | String | required | Unique provider name |
+| `ipList` | [String] | required | Proxy addresses in `host:port` format |
+| `regionTag` | String | — | Region label for Prometheus metrics |
+| `mutable` | Boolean | `true` | Whether this provider can be updated or removed via the API |
+| `auth` | BasicAuthInput | — | Omit for open or IP-whitelisted proxies |
+
+### BasicAuthInput
+
+| Field | Type | Description |
+|---|---|---|
+| `username` | String | HTTP Basic auth username |
+| `password` | String | HTTP Basic auth password |

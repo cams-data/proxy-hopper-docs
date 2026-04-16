@@ -111,12 +111,12 @@ ipPools:
         count: 3
 ```
 
-## Providers vs inline IPs
+## Why use providers?
 
-Proxy providers are optional. For simple setups you can list IPs directly in a target or IP pool without a provider block. Providers become useful when:
+Providers centralise your IP declarations in one place. Benefits:
 
-- Multiple targets or pools share the same credentials
-- You want per-region metrics via `regionTag`
-- You want to randomly sample a subset of IPs from a larger provider list (via `ipRequests.count`)
+- **Shared credentials** — one auth block covers all pools that reference this provider
+- **Per-region metrics** — the `regionTag` appears as a `region` label on all Prometheus metrics, letting you break down latency and failure rates by region
+- **Controlled sampling** — `ipRequests.count` lets each pool take exactly the slice it needs from a large provider list; multiple pools can draw from the same provider independently
 
 See [Config Reference](/admin/configuration/reference) for the full provider field reference.
