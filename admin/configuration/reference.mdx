@@ -59,6 +59,8 @@ At least one provider is required — IPs are declared here and referenced by po
 | `auth.password` | string | `""` | Password for HTTP Basic auth |
 | `ipList` | list | required | Proxy addresses — `host:port` or bare host |
 | `regionTag` | string | — | Region label attached to Prometheus metrics |
+| `mutable` | bool | `true` | When `false`, the provider cannot be updated or removed via the admin API |
+| `static` | bool | `true` | When `true` (default for YAML-defined providers), the provider is always overwritten from config on startup. Set `false` to allow API mutations while still seeding on first run |
 
 ```yaml
 proxyProviders:
@@ -91,6 +93,15 @@ ipPools:
       - provider: name
         count: 5
 ```
+
+### ipPools fields
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `name` | string | required | Unique identifier referenced from `targets[].ipPool` |
+| `ipRequests` | list | required | One or more provider draws — see below |
+| `mutable` | bool | `true` | When `false`, the pool cannot be updated or removed via the admin API |
+| `static` | bool | `true` | When `true` (default for YAML-defined pools), the pool is always overwritten from config on startup |
 
 ### ipRequests fields
 
@@ -127,7 +138,10 @@ The core routing config. Each inbound request is matched against the target list
 | `numRetries` | int | `3` | Retry attempts on failure, each using a different IP |
 | `ipFailuresUntilQuarantine` | int | `5` | Consecutive failures before an IP is quarantined |
 | `quarantineTime` | duration | `120s` | How long a quarantined IP sits out before returning |
+| `defaultProxyPort` | int | `8080` | Port used when a pool IP has no explicit port |
+| `spoofUserAgent` | bool | `true` | Replace the `User-Agent` header with a random browser UA. Override per-request with `X-Proxy-Hopper-User-Agent` |
 | `mutable` | bool | `true` | Whether this target can be updated or removed via the admin API |
+| `static` | bool | `true` | When `true` (default for YAML-defined targets), the target is always overwritten from config on startup |
 | `identity` | block | — | Per-(IP, target) client identity — see [below](#identity) |
 
 ```yaml
@@ -159,7 +173,6 @@ Attaches a persistent browser persona to each (IP, target) pair. **Disabled by d
 |---|---|---|---|
 | `enabled` | bool | `false` | Master switch |
 | `cookies` | bool | `true` | Persist and replay session cookies per IP |
-| `profile` | string | random | Fixed fingerprint profile name. Omit to pick a random profile per identity. Valid values: `chrome-windows`, `chrome-macos`, `safari-macos`, `firefox-windows`, `firefox-linux` |
 | `rotateAfterRequests` | int | — | Voluntarily rotate the identity after this many successful requests. Omit to disable |
 | `rotateOn429` | bool | `true` | Rotate identity immediately on a 429 response |
 | `warmup` | block | — | Warmup request sent through a fresh identity before it enters service |
@@ -170,7 +183,6 @@ Attaches a persistent browser persona to each (IP, target) pair. **Disabled by d
 identity:
   enabled: true
   cookies: true
-  # profile: chrome-windows   # omit for random per identity
   rotateAfterRequests: 100
   rotateOn429: true
   warmup:
@@ -235,17 +247,22 @@ All server fields can be set in three places — see [Config priority](#config-p
 | `port` | `PROXY_HOPPER_PORT` | `8080` | Proxy server port |
 | `admin` | `PROXY_HOPPER_ADMIN` | `false` | Enable the admin server (GraphQL API + REST endpoints) |
 | `adminPort` | `PROXY_HOPPER_ADMIN_PORT` | `8081` | Admin server port |
+| `adminHost` | `PROXY_HOPPER_ADMIN_HOST` | `0.0.0.0` | Admin server bind address |
 | `logLevel` | `PROXY_HOPPER_LOG_LEVEL` | `INFO` | `TRACE` \| `DEBUG` \| `INFO` \| `WARNING` \| `ERROR` |
 | `logFormat` | `PROXY_HOPPER_LOG_FORMAT` | `text` | `text` \| `json` |
 | `logFile` | `PROXY_HOPPER_LOG_FILE` | stderr | Path to log file |
 | `backend` | `PROXY_HOPPER_BACKEND` | `memory` | `memory` \| `redis` |
 | `redisUrl` | `PROXY_HOPPER_REDIS_URL` | `redis://localhost:6379/0` | Redis connection URL |
+| `proxyReadTimeout` | `PROXY_HOPPER_PROXY_READ_TIMEOUT` | — | Timeout in seconds for reading the upstream response body. Omit to use aiohttp's default |
 | `metrics` | `PROXY_HOPPER_METRICS` | `false` | Enable Prometheus `/metrics` endpoint |
 | `metricsPort` | `PROXY_HOPPER_METRICS_PORT` | `9090` | Metrics server port |
 | `probe` | `PROXY_HOPPER_PROBE` | `true` | Enable background IP health prober |
 | `probeInterval` | `PROXY_HOPPER_PROBE_INTERVAL` | `60` | Seconds between probe rounds |
 | `probeTimeout` | `PROXY_HOPPER_PROBE_TIMEOUT` | `10` | Per-probe HTTP timeout (seconds) |
 | `probeUrls` | `PROXY_HOPPER_PROBE_URLS` | Cloudflare + Google | Endpoints probed through each IP. Comma-separated as env var. |
+| `debugQuarantine` | `PROXY_HOPPER_DEBUG_QUARANTINE` | `false` | Log quarantine and cooldown events at DEBUG level |
+| `debugProbes` | `PROXY_HOPPER_DEBUG_PROBES` | `false` | Log probe results at DEBUG level |
+| `debugBackend` | `PROXY_HOPPER_DEBUG_BACKEND` | `false` | Log backend storage operations at DEBUG level |
 
 ```yaml
 server:

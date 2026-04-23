@@ -74,9 +74,11 @@ When you add or remove an IP from a provider via `addIpToProvider` / `removeIpFr
 3. All targets that reference those pools receive updated resolved IPs
 4. Live pool queues are updated — new IPs are pushed in; removed IPs drain naturally
 
-## Mutable vs immutable pools
+## Mutability and config ownership
 
-Setting `mutable: false` on a pool prevents it from being updated or removed via the admin API. This is useful for production pools you want to protect from accidental mutation:
+Two flags control how a pool interacts with the admin API:
+
+**`mutable: false`** — the pool cannot be updated or removed via the admin API at all:
 
 ```yaml
 ipPools:
@@ -87,4 +89,17 @@ ipPools:
         count: 20
 ```
 
-Immutable pools can still be modified by editing the config file and restarting the server.
+**`static: true`** (default for all YAML-defined pools) — the pool is config-owned. On every startup the pool is overwritten from the config file, ensuring config changes always take effect even when using a persistent Redis backend. API mutations are rejected on static pools.
+
+Set `static: false` on a YAML-defined pool to allow the API to manage it at runtime while still seeding it on first run:
+
+```yaml
+ipPools:
+  - name: dynamic-pool
+    static: false       # seed once; allow runtime mutations after that
+    ipRequests:
+      - provider: provider-us
+        count: 10
+```
+
+Pools created via the admin API default to `static: false`.

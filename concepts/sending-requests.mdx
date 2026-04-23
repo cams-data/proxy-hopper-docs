@@ -75,6 +75,7 @@ All `X-Proxy-Hopper-*` headers are stripped before the request reaches the upstr
 | `X-Proxy-Hopper-Auth: Bearer <token>` | Required when [authentication is enabled](/admin/authentication/overview). API key or JWT. |
 | `X-Proxy-Hopper-Tag: <string>` | Optional label propagated to Prometheus metrics as the `tag` label. Useful for identifying which endpoints are hitting rate limits. |
 | `X-Proxy-Hopper-Retries: <int>` | Override the target's `numRetries` for this request only. Must be a non-negative integer; invalid values fall back to the target default. |
+| `X-Proxy-Hopper-User-Agent: <string>` | Override the `User-Agent` sent to the upstream for this request only. Bypasses the target's `spoofUserAgent` setting. |
 
 ### Tagging requests for metrics
 

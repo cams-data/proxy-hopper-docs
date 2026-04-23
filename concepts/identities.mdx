@@ -34,15 +34,7 @@ Proxy Hopper ships with five browser profiles:
 | `firefox-windows` | Firefox on Windows 10 |
 | `firefox-linux` | Firefox on Linux |
 
-When no `profile` is set, each new identity picks a profile at random. This means different IPs in the same pool present as different browser types — which is more realistic than every IP using the same User-Agent.
-
-To pin all identities on a target to one profile:
-
-```yaml
-identity:
-  enabled: true
-  profile: chrome-windows
-```
+Each new identity picks a profile at random. This means different IPs in the same pool present as different browser types — which is more realistic than every IP using the same User-Agent. Profile selection is not configurable per-target.
 
 ## Cookie isolation
 
@@ -95,7 +87,6 @@ targets:
     identity:
       enabled: true
       cookies: true               # persist and replay session cookies per IP
-      # profile: chrome-windows  # fix a profile, or omit for random per identity
       rotateAfterRequests: 100    # voluntarily rotate after 100 successful requests
       rotateOn429: true           # rotate immediately on 429
       warmup:

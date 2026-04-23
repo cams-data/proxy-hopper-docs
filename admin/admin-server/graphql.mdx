@@ -274,7 +274,7 @@ mutation {
 
 #### `updateProvider`
 
-Update an existing mutable provider. Does **not** automatically cascade to pools and targets — use `addIpToProvider` / `removeIpFromProvider` for live IP changes.
+Update an existing mutable provider. Cascades the updated IP list through all pools and targets that reference this provider.
 
 ```graphql
 mutation {
@@ -341,7 +341,10 @@ mutation {
 | `numRetries` | Int | `3` | Retry attempts on failure |
 | `ipFailuresUntilQuarantine` | Int | `5` | Consecutive failures before quarantine |
 | `quarantineTime` | Float | `120.0` | Quarantine duration in seconds |
+| `defaultProxyPort` | Int | `8080` | Port used when a pool IP has no explicit port |
+| `spoofUserAgent` | Boolean | `true` | Replace `User-Agent` with a random browser UA |
 | `mutable` | Boolean | `true` | Whether this target can be updated or removed via the API |
+| `static` | Boolean | `false` | When `true`, the target is treated as config-owned and rejects API mutations |
 
 ### IpPoolInput
 
@@ -350,6 +353,7 @@ mutation {
 | `name` | String | required | Unique pool name |
 | `ipRequests` | [IpRequestInput] | required | One or more provider IP requests |
 | `mutable` | Boolean | `true` | Whether this pool can be updated or removed via the API |
+| `static` | Boolean | `false` | When `true`, the pool is treated as config-owned and rejects API mutations |
 
 ### IpRequestInput
 
@@ -366,6 +370,7 @@ mutation {
 | `ipList` | [String] | required | Proxy addresses in `host:port` format |
 | `regionTag` | String | — | Region label for Prometheus metrics |
 | `mutable` | Boolean | `true` | Whether this provider can be updated or removed via the API |
+| `static` | Boolean | `false` | When `true`, the provider is treated as config-owned and rejects API mutations |
 | `auth` | BasicAuthInput | — | Omit for open or IP-whitelisted proxies |
 
 ### BasicAuthInput

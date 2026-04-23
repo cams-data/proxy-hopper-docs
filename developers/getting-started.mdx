@@ -108,6 +108,7 @@ All `X-Proxy-Hopper-*` headers are stripped before the request reaches the upstr
 | `X-Proxy-Hopper-Auth` | Bearer token — required when auth is enabled |
 | `X-Proxy-Hopper-Tag` | Optional label for Prometheus metrics |
 | `X-Proxy-Hopper-Retries` | Override retry count for this request only |
+| `X-Proxy-Hopper-User-Agent` | Override the `User-Agent` sent to the upstream for this request only |
 
 ## Disabling retries for non-idempotent requests
 
